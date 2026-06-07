@@ -52,6 +52,7 @@ const db = init({ appId: INSTANT_DB_APP_ID });
 
 const myId = `player_${Math.random().toString(36).slice(2, 8)}`;
 let myName = ui.playerName();
+const INTERACT_KEY = 'KeyE';
 const keys = new Set();
 const remoteMarkers = new Map();
 const vrControllers = [];
@@ -130,15 +131,19 @@ function resizeRenderer() {
 window.addEventListener('resize', resizeRenderer);
 resizeRenderer();
 
+function isInteractKey(event) {
+  return event.code === INTERACT_KEY || event.key?.toLowerCase() === 'e';
+}
+
 document.addEventListener('keydown', (event) => {
   if (event.code === 'Escape') { toggleServerMenu(); return; }
-  keys.add(event.code);
-  if (event.code === 'KeyE') handleInteractTap();
+  keys.add(isInteractKey(event) ? INTERACT_KEY : event.code);
+  if (isInteractKey(event) && !event.repeat) handleInteractTap();
   if (event.code === 'KeyF' || event.code === 'Space') tryAttack();
   if (event.code === 'KeyQ') activateSelectedAbility();
   if (event.code === 'KeyR') cycleAbility(1);
 });
-document.addEventListener('keyup', (event) => keys.delete(event.code));
+document.addEventListener('keyup', (event) => keys.delete(isInteractKey(event) ? INTERACT_KEY : event.code));
 renderer.domElement.addEventListener('pointerdown', (event) => {
   audio.unlock();
   if (event.button === 0) tryAttack();
@@ -1291,7 +1296,6 @@ function updateEffects(delta) {
 function updateVRInput(delta) {
   if (!renderer.xr.isPresenting) {
     vrMoveInput.set(0, 0);
-    keys.delete('KeyE');
     return;
   }
   updateVRMenuPointers();
@@ -1339,10 +1343,10 @@ function updateVRInput(delta) {
     state.previousCycleAxisY = cycleY;
   }
   if (game?.local?.role === 'survivor' && !menuOpen && game && !game.ended && !game.waitingBetweenRounds) {
-    if (interactHeld) keys.add('KeyE');
-    else keys.delete('KeyE');
+    if (interactHeld) keys.add(INTERACT_KEY);
+    else keys.delete(INTERACT_KEY);
   } else {
-    keys.delete('KeyE');
+    keys.delete(INTERACT_KEY);
   }
   if (vrMoveInput.lengthSq() > 1) vrMoveInput.normalize();
 }

@@ -58,7 +58,7 @@ export class GameUI {
         </div>
         <div id="objective" class="objective">Objective</div>
         <div id="prompt" class="prompt"></div>
-        <div class="meter"><span id="progress"></span></div>
+        <div class="meter hidden"><span id="progress"></span></div>
         <div id="center-warning" class="center-warning"></div>
       </section>
       <section id="round-menu" class="panel lobby hidden">
@@ -102,6 +102,7 @@ export class GameUI {
     this.warning = this.root.querySelector('#center-warning');
     this.menuMessage = this.root.querySelector('#menu-message');
     this.publicList = this.root.querySelector('#public-list');
+    this.progressMeter = this.root.querySelector('.meter');
 
     this.root.querySelector('#player-name').value = localStorage.getItem('ruleBeastName') || '';
     this.root.querySelector('#refresh-public').addEventListener('click', () => this.onRefreshPublic?.());
@@ -254,6 +255,7 @@ export class GameUI {
     this.root.querySelector('#puzzles-left').textContent = `Puzzles: ${state.puzzlesRemaining}`;
     this.root.querySelector('#objective').textContent = state.objective;
     this.root.querySelector('#progress').style.width = `${Math.round(state.progress * 100)}%`;
+    this.progressMeter.classList.toggle('hidden', !(state.role === 'survivor' && !state.dead && state.progress > 0));
     this.prompt.textContent = state.prompt || '';
     this.warning.textContent = state.warning || '';
   }
