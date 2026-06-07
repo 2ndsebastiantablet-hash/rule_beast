@@ -1,0 +1,15 @@
+{
+  "name": "Rule Beast VR",
+  "revisionLabel": "Clean up VR input handlers and server menu sync",
+  "description": "",
+  "mode": "Universal",
+  "exportDate": "2026-05-31T01:50:46.536Z",
+  "rosebudBuiltInSplash": {
+    "present": true,
+    "version": 1
+  },
+  "assetCount": 4,
+  "assetTypes": [
+    "audio"
+  ]
+}

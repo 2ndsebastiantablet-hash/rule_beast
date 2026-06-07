@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rule Beast VR</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://esm.sh/three@0.184.0",
+          "three/": "https://esm.sh/three@0.184.0/",
+          "tone": "https://esm.sh/tone@14.7.77",
+          "@instantdb/core": "https://esm.sh/@instantdb/core@0.22.155"
+        }
+      }
+    </script>
+    <style>
+      html, body, #game-container { width: 100%; height: 100%; margin: 0; padding: 0; background-color: #03050a; overflow: hidden; }
+      canvas { display: block; }
+      body { touch-action: none; font-family: 'Orbitron', system-ui, sans-serif; color: #d8fbff; }
+      #ui-container { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+      .hidden { display: none !important; }
+      .panel { pointer-events: auto; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(760px, calc(100vw - 32px)); padding: 30px; border: 1px solid rgba(102, 245, 255, 0.35); background: linear-gradient(145deg, rgba(4, 9, 18, 0.94), rgba(28, 3, 12, 0.9)); box-shadow: 0 0 60px rgba(255, 20, 60, 0.18), inset 0 0 40px rgba(80, 240, 255, 0.08); border-radius: 18px; }
+      h1 { margin: 6px 0 12px; font-size: clamp(42px, 7vw, 78px); color: #ff3159; text-shadow: 0 0 18px rgba(255,49,89,.75); letter-spacing: 2px; }
+      h2 { color: #73f7ff; font-size: clamp(28px, 5vw, 52px); }
+      p { line-height: 1.55; color: #b8cad1; }
+      .eyebrow { color: #73f7ff; font-size: 12px; letter-spacing: 3px; }
+      .lobby-grid { display: grid; grid-template-columns: 180px 1fr; gap: 14px; margin: 18px 0; }
+      .menu-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 18px 0 10px; }
+      .inline-join { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+      .menu-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+      .two-up button { min-height: 46px; }
+      .browser-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 14px; }
+      .browser-head h3 { margin: 0; color: #73f7ff; }
+      .public-list { display: grid; gap: 8px; max-height: 220px; overflow: auto; padding-right: 4px; }
+      .public-row, .empty-row { display: grid; grid-template-columns: 1fr 80px 120px auto; gap: 10px; align-items: center; padding: 10px; border-radius: 10px; background: rgba(115,247,255,.08); border: 1px solid rgba(115,247,255,.16); }
+      .public-row small { display: block; color: #91a9b4; margin-top: 4px; }
+      .empty-row { grid-template-columns: 1fr; color: #91a9b4; }
+      .lobby-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 14px 0; }
+      .lobby-meta div { padding: 12px; border: 1px solid rgba(115,247,255,.22); border-radius: 12px; background: rgba(0,0,0,.28); }
+      .lobby-meta strong { display: block; color: #73f7ff; font-size: 11px; margin-bottom: 5px; }
+      label { display: grid; gap: 7px; color: #73f7ff; font-size: 13px; }
+      select, input { min-height: 38px; border-radius: 9px; border: 1px solid rgba(115,247,255,.35); background: rgba(0,0,0,.45); color: #d8fbff; padding: 0 10px; font-family: inherit; text-transform: uppercase; }
+      .presence { min-height: 54px; padding: 12px; background: rgba(4, 14, 24, 0.68); border-radius: 12px; border: 1px solid rgba(255,255,255,.08); }
+      .player-row { display: grid; grid-template-columns: 1fr 90px auto; gap: 10px; align-items: center; padding: 10px; margin: 6px 0; border-radius: 10px; background: rgba(115,247,255,.08); border: 1px solid rgba(115,247,255,.16); }
+      .player-row.self { background: rgba(255,49,89,.14); border-color: rgba(255,49,89,.35); }
+      .pill { display: inline-block; margin: 8px 8px 0 0; padding: 7px 10px; border-radius: 999px; background: rgba(115,247,255,.12); color: #aefcff; border: 1px solid rgba(115,247,255,.25); }
+      .pill.self { background: rgba(255,49,89,.18); color: #ffc6d0; border-color: rgba(255,49,89,.4); }
+      .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+      .actions.compact { margin: 10px 0 16px; }
+      button { cursor: pointer; border: 0; border-radius: 11px; padding: 12px 16px; font-family: inherit; font-weight: 700; color: #051016; background: linear-gradient(180deg, #86fbff, #29b8d0); box-shadow: 0 0 18px rgba(80,240,255,.25); }
+      button:hover { filter: brightness(1.12); }
+      .hint { font-size: 12px; color: #91a9b4; }
+      .hud { position: absolute; inset: 0; padding: 18px; box-sizing: border-box; pointer-events: none; background: radial-gradient(circle at center, transparent 48%, rgba(255, 12, 50, 0.08)); }
+      .top-row { display: flex; justify-content: flex-start; gap: 12px; align-items: flex-start; }
+      .badge, .round-box, .objective, .prompt { background: rgba(1, 7, 14, 0.66); border: 1px solid rgba(115,247,255,.24); border-radius: 12px; padding: 12px 14px; backdrop-filter: blur(5px); text-shadow: 0 0 8px rgba(115,247,255,.4); }
+      .badge.monster { color: #ff4967; border-color: rgba(255,49,89,.55); }
+      .badge.survivor { color: #8dfaff; }
+      .round-box { min-width: min(360px, 42vw); text-align: center; }
+      .round-box span { display: block; color: #fff; font-size: 20px; }
+      .round-box small { display: block; margin-top: 5px; color: #ff9aad; font-size: 11px; }
+      .objective { position: absolute; left: 18px; bottom: 86px; width: min(620px, calc(100vw - 36px)); }
+      .prompt { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); width: min(680px, calc(100vw - 36px)); text-align: center; color: #dcfeff; }
+      .meter { position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%); width: min(420px, 60vw); height: 10px; border: 1px solid rgba(115,247,255,.35); background: rgba(0,0,0,.55); border-radius: 999px; overflow: hidden; }
+      .meter span { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #37e5ff, #72ffd2); box-shadow: 0 0 16px #72ffd2; transition: width .08s linear; }
+      .center-warning { position: absolute; left: 50%; top: 26%; transform: translateX(-50%); max-width: 780px; text-align: center; color: #ff3159; font-size: clamp(22px, 4vw, 40px); text-shadow: 0 0 20px rgba(255,49,89,.75); }
+      .corner-mute { pointer-events: auto; position: absolute; right: 18px; bottom: 18px; padding: 10px 12px; background: rgba(4, 14, 24, 0.85); color: #d8fbff; border: 1px solid rgba(115,247,255,.25); }
+      @media (max-width: 700px) { .lobby-grid { grid-template-columns: 1fr; } .top-row { align-items: stretch; flex-direction: column; } .round-box { min-width: auto; } }
+    </style>
+  
+<style>
+    #rosebud-exported-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #000;
+        opacity: 1;
+        transition: opacity 500ms ease-in-out;
+    }
+
+    #rosebud-exported-splash.is-hiding {
+        opacity: 0;
+    }
+
+    #rosebud-exported-splash .rosebud-exported-splash__content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        text-align: center;
+        color: #fff;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    #rosebud-exported-splash .rosebud-exported-splash__logo {
+        width: 100px;
+        height: 100px;
+        animation: rosebud-exported-splash-breathe 2.4s ease-in-out infinite;
+    }
+
+    #rosebud-exported-splash .rosebud-exported-splash__text {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 16px;
+        line-height: 1.25;
+        letter-spacing: 0.06em;
+    }
+
+    #rosebud-exported-splash .rosebud-exported-splash__text strong {
+        font-weight: 700;
+    }
+
+    #rosebud-exported-splash .rosebud-exported-splash__text span:last-child {
+        opacity: 0.88;
+    }
+
+    @keyframes rosebud-exported-splash-breathe {
+        0%,
+        100% {
+            transform: scale(1);
+        }
+        50% {
+            transform: scale(1.05);
+        }
+    }
+</style></head>
+  <body>
+<div id="rosebud-exported-splash" aria-live="polite">
+    <div class="rosebud-exported-splash__content">
+        <img
+            class="rosebud-exported-splash__logo"
+            src="__rosebud/rosebud-icon.png"
+            alt="Rosebud Logo"
+            width="100"
+            height="100"
+        />
+        <div class="rosebud-exported-splash__text" aria-label="Rosebud.AI Make Games">
+            <strong>Rosebud.AI</strong>
+            <span>Make Games</span>
+        </div>
+    </div>
+</div>
+    <div id="game-container"></div>
+    <div id="ui-container"></div>
+    <script type="module" src="main.js"></script>
+    <script src="https://storage.googleapis.com/rosebud_staticfiles/ChatManager.js"></script>
+    <script src="https://storage.googleapis.com/rosebud_staticfiles/ImageGenerator.js"></script>
+    <script src="https://storage.googleapis.com/rosebud_staticfiles/ProgressLogger.js"></script>
+    <script src="https://storage.googleapis.com/rosebud_staticfiles/OGP.js"></script>
+  
+<script>
+    (() => {
+        const splashRoot = document.getElementById('rosebud-exported-splash');
+        if (!splashRoot) return;
+
+        let isReady = false;
+        let isMinimumVisibleTimeElapsed = false;
+        let isHidden = false;
+
+        const maybeHideSplash = () => {
+            if (isHidden || !isReady || !isMinimumVisibleTimeElapsed) return;
+
+            isHidden = true;
+            splashRoot.classList.add('is-hiding');
+            window.setTimeout(() => splashRoot.remove(), 500);
+        };
+
+        const markReady = () => {
+            isReady = true;
+            maybeHideSplash();
+        };
+
+        window.setTimeout(() => {
+            isMinimumVisibleTimeElapsed = true;
+            maybeHideSplash();
+        }, 1000);
+
+        if (document.readyState === 'complete') {
+            markReady();
+        } else {
+            window.addEventListener('load', markReady, { once: true });
+        }
+
+        
+    })();
+</script></body>
+</html>
