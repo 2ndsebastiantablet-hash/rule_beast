@@ -51,7 +51,7 @@ export function clearWorld(world) {
 export function createWorld(scene, materials, layout) {
   const objects = [];
   const colliders = [];
-  const interactables = { doors: [], roomLabels: [] };
+  const interactables = { doors: [], roomLabels: [], stairs: [] };
   const add = (object) => { scene.add(object); objects.push(object); return object; };
   const propMaterials = {
     crate: new THREE.MeshStandardMaterial({ color: 0x2b261d, roughness: 0.85, metalness: 0.05 }),
@@ -64,16 +64,22 @@ export function createWorld(scene, materials, layout) {
   };
 
   const floorBounds = layout.bounds || { w: 54, d: 48 };
-  const floor = add(new THREE.Mesh(new THREE.BoxGeometry(floorBounds.w, 0.28, floorBounds.d), materials.floor));
-  floor.position.set(floorBounds.x || 0, -0.14, floorBounds.z || 0);
-  floor.receiveShadow = true;
+  const floors = layout.floors?.length ? layout.floors : [{ id: 'ground', name: 'Ground', y: 0, bounds: floorBounds }];
+  floors.forEach((floorInfo) => {
+    const bounds = floorInfo.bounds || floorBounds;
+    const floor = add(new THREE.Mesh(new THREE.BoxGeometry(bounds.w, 0.28, bounds.d), materials.floor));
+    floor.position.set(bounds.x || 0, (floorInfo.y || 0) - 0.14, bounds.z || 0);
+    floor.receiveShadow = true;
+    const grid = add(new THREE.GridHelper(bounds.w || 52, 26, 0x293142, 0x151b2a));
+    grid.position.set(bounds.x || 0, (floorInfo.y || 0) + 0.025, bounds.z || 0);
+  });
 
   (layout.grass || []).forEach((area) => {
     const mat = materials.room.clone();
     mat.color.setHex(area.color || 0x102817);
     mat.opacity = 0.9;
     const patch = add(new THREE.Mesh(new THREE.BoxGeometry(area.w, 0.03, area.d), mat));
-    patch.position.set(area.x, 0.01, area.z);
+    patch.position.set(area.x, (area.y || 0) + 0.01, area.z);
     patch.receiveShadow = true;
   });
 
@@ -81,9 +87,9 @@ export function createWorld(scene, materials, layout) {
     const mat = materials.room.clone();
     mat.color.setHex(area.color);
     const room = add(new THREE.Mesh(new THREE.BoxGeometry(area.w, 0.04, area.d), mat));
-    room.position.set(area.x, 0.005, area.z);
+    room.position.set(area.x, (area.y || 0) + 0.005, area.z);
     const label = add(makeLabel(area.name, area.name.includes('Monster') ? '#ff4967' : '#93faff'));
-    label.position.set(area.x, 2.85, area.z);
+    label.position.set(area.x, (area.y || 0) + 2.85, area.z);
     label.visible = false;
     interactables.roomLabels.push({ area, label });
   });
@@ -93,44 +99,65 @@ export function createWorld(scene, materials, layout) {
       const { from, to } = path;
       const midX = (from.x + to.x) / 2;
       const midZ = (from.z + to.z) / 2;
+      const y = path.y || from.y || to.y || 0;
       const hallX = add(new THREE.Mesh(new THREE.BoxGeometry(Math.abs(from.x - to.x) + 4, 0.035, 3.2), materials.room.clone()));
-      hallX.position.set(midX, 0.012, from.z);
+      hallX.position.set(midX, y + 0.012, from.z);
       const hallZ = add(new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.035, Math.abs(from.z - to.z) + 4), materials.room.clone()));
-      hallZ.position.set(to.x, 0.014, midZ);
+      hallZ.position.set(to.x, y + 0.014, midZ);
       return;
     }
     const mat = materials.room.clone();
     mat.color.setHex(path.color || 0x101820);
     const hall = add(new THREE.Mesh(new THREE.BoxGeometry(path.w, 0.035, path.d), mat));
-    hall.position.set(path.x, 0.014, path.z);
+    hall.position.set(path.x, (path.y || 0) + 0.014, path.z);
   });
-
-  add(new THREE.GridHelper(52, 26, 0x293142, 0x151b2a)).position.y = 0.025;
 
   layout.walls.forEach((wall, index) => {
     const mesh = add(new THREE.Mesh(new THREE.BoxGeometry(wall.w, 3.4, wall.d), materials.wall));
-    mesh.position.set(wall.x, 1.7, wall.z);
+    const y = wall.y || 0;
+    mesh.position.set(wall.x, y + 1.7, wall.z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    colliders.push({ ...wall, minX: wall.x - wall.w / 2, maxX: wall.x + wall.w / 2, minZ: wall.z - wall.d / 2, maxZ: wall.z + wall.d / 2 });
+    colliders.push({ ...wall, y, minX: wall.x - wall.w / 2, maxX: wall.x + wall.w / 2, minZ: wall.z - wall.d / 2, maxZ: wall.z + wall.d / 2 });
     if (index > 3) {
       const trim = add(new THREE.Mesh(new THREE.BoxGeometry(wall.w + 0.05, 0.08, wall.d + 0.05), materials.wallTrim));
-      trim.position.set(wall.x, 3.43, wall.z);
+      trim.position.set(wall.x, y + 3.43, wall.z);
     }
   });
 
   layout.doors.forEach((door) => {
     const mesh = add(new THREE.Mesh(new THREE.BoxGeometry(1.05, 2.35, 0.18), materials.door.clone()));
-    mesh.position.set(door.x, 1.15, door.z);
+    mesh.position.set(door.x, (door.y || 0) + 1.15, door.z);
     mesh.rotation.y = door.rotation || 0;
     mesh.castShadow = true;
-    interactables.doors.push({ ...door, baseRotation: door.rotation || 0, mesh, open: false, position: new THREE.Vector3(door.x, 0, door.z) });
+    interactables.doors.push({ ...door, baseRotation: door.rotation || 0, mesh, open: false, position: new THREE.Vector3(door.x, door.y || 0, door.z) });
+  });
+
+  (layout.stairConnections || []).forEach((stair) => {
+    [stair.from, stair.to].forEach((point, index) => {
+      const target = index === 0 ? stair.to : stair.from;
+      const pad = add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 1.8), materials.door.clone()));
+      pad.position.set(point.x, point.y + 0.07, point.z);
+      pad.rotation.y = stair.rotation || 0;
+      const rail = add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.9, 0.18), materials.wallTrim.clone()));
+      rail.position.set(point.x, point.y + 0.58, point.z - 0.72);
+      const marker = add(new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.72, 4), new THREE.MeshBasicMaterial({ color: 0x62f6ff })));
+      marker.position.set(point.x, point.y + 0.75, point.z);
+      marker.rotation.y = Math.PI / 4;
+      interactables.stairs.push({
+        id: `${stair.id}_${index === 0 ? 'from' : 'to'}`,
+        name: stair.name,
+        from: point,
+        target,
+        position: new THREE.Vector3(point.x, point.y, point.z)
+      });
+    });
   });
 
   (layout.props || []).forEach((item) => {
     const mat = (propMaterials[item.type] || propMaterials.crate).clone();
     const mesh = add(new THREE.Mesh(new THREE.BoxGeometry(item.w, item.height || 0.8, item.d), mat));
-    mesh.position.set(item.x, (item.height || 0.8) / 2, item.z);
+    mesh.position.set(item.x, (item.y || 0) + (item.height || 0.8) / 2, item.z);
     mesh.rotation.y = item.rotation || 0;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -146,7 +173,7 @@ export function createWorld(scene, materials, layout) {
   }));
   lights.forEach((lightInfo) => {
     const lamp = add(new THREE.PointLight(lightInfo.color, lightInfo.intensity, lightInfo.distance, 2.2));
-    lamp.position.set(lightInfo.x, 2.65, lightInfo.z);
+    lamp.position.set(lightInfo.x, (lightInfo.y || 0) + 2.65, lightInfo.z);
     lamp.userData.flicker = lightInfo.flicker;
     lamp.userData.baseIntensity = lamp.intensity;
     const bulb = add(new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: lamp.color })));
@@ -234,7 +261,9 @@ export function createPuzzleStations(scene, materials, layout) {
   return layout.puzzles.map((pos, index) => {
     const type = PUZZLE_TYPES[pos.typeIndex % PUZZLE_TYPES.length];
     const group = new THREE.Group();
-    group.position.set(pos.x, 0, pos.z);
+    const y = pos.y || 0;
+    group.position.set(pos.x, y, pos.z);
+    group.userData.baseY = y;
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.8, 0.85, 8), materials.puzzle);
     base.position.y = 0.42;
     base.castShadow = true;
@@ -250,7 +279,22 @@ export function createPuzzleStations(scene, materials, layout) {
     group.add(symbol);
     scene.add(group);
     group.visible = false;
-    return { id: `puzzle_${index}`, group, ring, symbol, label: null, type, room: pos.room, base, solved: false, active: false, progress: 0, position: new THREE.Vector3(pos.x, 0, pos.z) };
+    return {
+      id: `puzzle_${index}`,
+      group,
+      ring,
+      symbol,
+      label: null,
+      type,
+      room: pos.room,
+      floor: pos.floor || 'ground',
+      zone: pos.zone || pos.room || 'default',
+      base,
+      solved: false,
+      active: false,
+      progress: 0,
+      position: new THREE.Vector3(pos.x, y, pos.z)
+    };
   });
 }
 
@@ -274,7 +318,7 @@ export function updatePuzzleLabel(puzzle) {
 export function setPuzzleActive(puzzle, active) {
   puzzle.active = active;
   puzzle.group.visible = active || puzzle.solved;
-  puzzle.group.position.y = active || puzzle.solved ? 0 : -99;
+  puzzle.group.position.y = active || puzzle.solved ? (puzzle.position?.y || puzzle.group.userData.baseY || 0) : -99;
   puzzle.ring.visible = active && !puzzle.solved;
   puzzle.symbol.material.color.copy(puzzle.solved ? new THREE.Color(0x4affc9) : active ? cyan : new THREE.Color(0x35545f));
 }
@@ -291,7 +335,7 @@ export function markPuzzleSolved(puzzle, materials) {
 
 export function makeCorpse(scene, position) {
   const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 1.0, 5, 8), createMaterials().dead);
-  mesh.position.set(position.x, 0.32, position.z);
+  mesh.position.set(position.x, (position.y || 0) + 0.32, position.z);
   mesh.rotation.z = Math.PI / 2;
   mesh.castShadow = true;
   scene.add(mesh);
@@ -300,6 +344,10 @@ export function makeCorpse(scene, position) {
 
 export function distance2D(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
+}
+
+export function distance3D(a, b) {
+  return Math.hypot(a.x - b.x, (a.y || 0) - (b.y || 0), a.z - b.z);
 }
 
 export { red, cyan };

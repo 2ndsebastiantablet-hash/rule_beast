@@ -1,12 +1,14 @@
 export const DEFAULT_MAP_ID = 'default_bunker_lab';
 export const AMUSEMENT_PARK_MAP_ID = 'amusement_park';
+export const HOTEL_MAP_ID = 'hotel';
 export const WALL_GRID_SIZE = 0.5;
 export const WALL_THICKNESS = 0.55;
 export const WALL_OVERLAP = 0.08;
 
 export const MAP_OPTIONS = [
   { id: DEFAULT_MAP_ID, name: 'Bunker Lab' },
-  { id: AMUSEMENT_PARK_MAP_ID, name: 'Amusement Park' }
+  { id: AMUSEMENT_PARK_MAP_ID, name: 'Amusement Park' },
+  { id: HOTEL_MAP_ID, name: 'Hotel' }
 ];
 
 export function snapToGrid(value, gridSize = WALL_GRID_SIZE) {
@@ -16,11 +18,13 @@ export function snapToGrid(value, gridSize = WALL_GRID_SIZE) {
 // Future maps should create walls through this helper. Wall boxes are snapped to a
 // shared grid and slightly extended along their long axis, so touching segments
 // overlap visually and physically instead of leaving tiny walkable seams.
-export function createWallSegment(id, x, z, w, d) {
+export function createWallSegment(id, x, z, w, d, y = 0, floor = 'ground') {
   const snapped = {
     id,
     x: snapToGrid(x),
     z: snapToGrid(z),
+    y,
+    floor,
     w: Math.max(WALL_THICKNESS, snapToGrid(w)),
     d: Math.max(WALL_THICKNESS, snapToGrid(d))
   };
@@ -29,13 +33,13 @@ export function createWallSegment(id, x, z, w, d) {
   return snapped;
 }
 
-const room = (name, x, z, w, d, color = 0x111824) => ({ name, x, z, w, d, color });
-const corridor = (name, x, z, w, d, color = 0x0f1722) => ({ name, x, z, w, d, color });
-const grass = (name, x, z, w, d, color = 0x102817) => ({ name, x, z, w, d, color });
+const room = (name, x, z, w, d, color = 0x111824, y = 0, floor = 'ground') => ({ name, x, z, y, floor, w, d, color });
+const corridor = (name, x, z, w, d, color = 0x0f1722, y = 0, floor = 'ground') => ({ name, x, z, y, floor, w, d, color });
+const grass = (name, x, z, w, d, color = 0x102817, y = 0, floor = 'ground') => ({ name, x, z, y, floor, w, d, color });
 const wall = (...args) => createWallSegment(...args);
-const door = (id, x, z, roomName, rotation = 0) => ({ id, x, z, room: roomName, rotation });
-const puzzle = (x, z, roomName, typeIndex) => ({ x, z, room: roomName, typeIndex });
-const light = (x, z, color = 0x6eeeff, intensity = 0.72, distance = 7.2, flicker = false) => ({ x, z, color, intensity, distance, flicker });
+const door = (id, x, z, roomName, rotation = 0, y = 0, floor = 'ground') => ({ id, x, z, y, floor, room: roomName, rotation });
+const puzzle = (x, z, roomName, typeIndex, zone = roomName, floor = 'ground', y = 0) => ({ x, z, y, floor, zone, room: roomName, typeIndex });
+const light = (x, z, color = 0x6eeeff, intensity = 0.72, distance = 7.2, flicker = false, y = 0, floor = 'ground') => ({ x, z, y, floor, color, intensity, distance, flicker });
 
 export function createDefaultBunkerLabLayout(seed = 0) {
   // Recreated from the supplied bunker reference as an original Rule Beast layout.
@@ -146,6 +150,7 @@ export function createDefaultBunkerLabLayout(seed = 0) {
     props: [],
     lights,
     puzzles,
+    puzzleSlots: puzzles,
     survivorSpawn: { x: -18.8, z: 12.3 },
     monsterSpawn: { x: 18.8, z: -11.2 }
   };
@@ -225,12 +230,185 @@ export function createAmusementParkLayout(seed = 0) {
     props: [],
     lights,
     puzzles,
+    puzzleSlots: puzzles,
     survivorSpawn: { x: -21, z: 1 },
     monsterSpawn: { x: 20, z: -11 }
   };
 }
 
+export function createHotelLayout(seed = 0) {
+  const floors = [
+    { id: 'basement', name: 'Basement', y: -4, bounds: { x: 0, z: 0, w: 54, d: 48 } },
+    { id: 'floor1', name: 'Floor 1 / Lobby', y: 0, bounds: { x: 0, z: 0, w: 54, d: 48 } },
+    { id: 'floor2', name: 'Floor 2 / Guest Suites', y: 4, bounds: { x: 0, z: 0, w: 54, d: 48 } },
+    { id: 'floor3', name: 'Floor 3 / Event Lounge', y: 8, bounds: { x: 0, z: 0, w: 54, d: 48 } }
+  ];
+  const floorY = Object.fromEntries(floors.map((floorInfo) => [floorInfo.id, floorInfo.y]));
+  const r = (floor, name, x, z, w, d, color) => room(name, x, z, w, d, color, floorY[floor], floor);
+  const c = (floor, name, x, z, w, d, color) => corridor(name, x, z, w, d, color, floorY[floor], floor);
+  const w = (floor, id, x, z, width, depth) => wall(`${floor}-${id}`, x, z, width, depth, floorY[floor], floor);
+  const d = (floor, id, x, z, roomName, rotation = 0) => door(`${floor}-${id}`, x, z, roomName, rotation, floorY[floor], floor);
+  const p = (floor, zone, x, z, roomName, typeIndex) => puzzle(x, z, roomName, typeIndex, zone, floor, floorY[floor]);
+  const l = (floor, x, z, color, intensity, distance, flicker = false) => light(x, z, color, intensity, distance, flicker, floorY[floor], floor);
+
+  const rooms = [
+    r('basement', 'Basement Central Lounge', 0, 0, 20, 14, 0x11151c),
+    r('basement', 'Basement West Dead-End Room', -18, -4, 8, 10, 0x10131a),
+    r('basement', 'Basement Bath Utility', -18, 12, 8, 7, 0x101923),
+    r('basement', 'Basement Security Room', 16, -2, 10, 8, 0x101923),
+    r('basement', 'Basement Staff Utility', 18, 10, 10, 9, 0x17150f),
+    r('basement', 'Basement Angled Service Hall', 14, -13, 14, 5, 0x121922),
+    r('floor1', 'Ground Lobby Hall', 0, 2, 20, 13, 0x1c1712),
+    r('floor1', 'Front Desk Reception', -9, -7, 10, 6, 0x1f1512),
+    r('floor1', 'Lobby Lounge', 13, -5, 10, 7, 0x181e1a),
+    r('floor1', 'Service Hallway', -15, 8, 13, 4, 0x101820),
+    r('floor1', 'Back Office', -21, 10, 7, 8, 0x111923),
+    r('floor1', 'Ground Bath Utility', 18, 10, 8, 7, 0x101923),
+    r('floor1', 'Main Entrance Vestibule', 0, 16, 16, 5, 0x1d1a13),
+    r('floor2', 'Floor 2 Central Common', 0, 0, 15, 15, 0x1d1913),
+    r('floor2', 'Floor 2 Left Guest Wing', -17, 0, 12, 22, 0x171b16),
+    r('floor2', 'Floor 2 Right Guest Wing', 17, 0, 12, 22, 0x171b16),
+    r('floor2', 'Floor 2 North Baths', 0, -13, 16, 6, 0x111923),
+    r('floor2', 'Floor 2 South Balcony Hall', 0, 13, 16, 6, 0x171510),
+    r('floor2', 'Floor 2 West Suite Loop', -20, 11, 8, 8, 0x151b20),
+    r('floor2', 'Floor 2 East Suite Loop', 20, 11, 8, 8, 0x151b20),
+    r('floor3', 'Floor 3 Banquet Lounge', 0, 2, 23, 14, 0x20170f),
+    r('floor3', 'Floor 3 Curved Hall', 0, -13, 22, 8, 0x1c1712),
+    r('floor3', 'Floor 3 Left Suite', -20, 3, 9, 12, 0x151b20),
+    r('floor3', 'Floor 3 Right Chamber', 20, 2, 10, 12, 0x151b20),
+    r('floor3', 'Floor 3 South Gallery', 0, 14, 14, 5, 0x171510)
+  ];
+
+  const corridors = [
+    c('basement', 'Basement West Loop', -10, 7, 9, 3.5, 0x111820),
+    c('basement', 'Basement East Connector', 9, 7, 11, 3.5, 0x111820),
+    c('basement', 'Basement South Service Run', -4, 14, 12, 3, 0x101820),
+    c('floor1', 'Lobby West Service Connector', -11, 2, 8, 3.4, 0x121a20),
+    c('floor1', 'Lobby East Utility Connector', 12, 4, 9, 3.4, 0x121a20),
+    c('floor1', 'Lobby Back Hall Connector', -10, 12, 12, 3.2, 0x101820),
+    c('floor2', 'Floor 2 Left Hall Loop', -12, 0, 4, 18, 0x111820),
+    c('floor2', 'Floor 2 Right Hall Loop', 12, 0, 4, 18, 0x111820),
+    c('floor2', 'Floor 2 North Connector', 0, -8, 24, 3.5, 0x111820),
+    c('floor2', 'Floor 2 South Connector', 0, 8, 24, 3.5, 0x111820),
+    c('floor3', 'Floor 3 West Connector', -13, 2, 8, 3.5, 0x111820),
+    c('floor3', 'Floor 3 East Connector', 13, 2, 8, 3.5, 0x111820),
+    c('floor3', 'Floor 3 Curved Left Chord', -10, -9, 8, 3.4, 0x1d1712),
+    c('floor3', 'Floor 3 Curved Right Chord', 10, -9, 8, 3.4, 0x1d1712)
+  ];
+
+  const walls = [
+    w('basement', 'north-boundary', 0, -20, 48, 1.1), w('basement', 'south-boundary', 0, 20, 48, 1.1),
+    w('basement', 'west-boundary', -24, 0, 1.1, 40), w('basement', 'east-boundary', 24, 0, 1.1, 40),
+    w('basement', 'west-room-east', -13.5, -4, 1.1, 10), w('basement', 'west-room-south', -18, 1.5, 8, 1.1),
+    w('basement', 'bath-east', -13.5, 12, 1.1, 7), w('basement', 'central-north', 0, -7.5, 19, 1.1),
+    w('basement', 'central-south', 0, 7.5, 18, 1.1), w('basement', 'security-west', 10.5, -2, 1.1, 8),
+    w('basement', 'utility-west', 12.5, 10, 1.1, 9), w('basement', 'angled-hall-south', 15, -9.5, 14, 1.1),
+    w('floor1', 'north-boundary', 0, -20, 48, 1.1), w('floor1', 'south-boundary', 0, 20, 48, 1.1),
+    w('floor1', 'west-boundary', -24, 0, 1.1, 40), w('floor1', 'east-boundary', 24, 0, 1.1, 40),
+    w('floor1', 'reception-south', -9, -3.7, 10, 1.1), w('floor1', 'lounge-south', 13, -1.2, 10, 1.1),
+    w('floor1', 'service-east', -8.5, 8, 1.1, 4), w('floor1', 'back-office-east', -16.5, 10, 1.1, 8),
+    w('floor1', 'bath-west', 13.5, 10, 1.1, 7), w('floor1', 'lobby-north', 0, -4.6, 12, 1.1),
+    w('floor1', 'vestibule-north', 0, 13.4, 12, 1.1),
+    w('floor2', 'north-boundary', 0, -21, 50, 1.1), w('floor2', 'south-boundary', 0, 21, 50, 1.1),
+    w('floor2', 'west-boundary', -25, 0, 1.1, 42), w('floor2', 'east-boundary', 25, 0, 1.1, 42),
+    w('floor2', 'left-wing-east-upper', -10.5, -7, 1.1, 9), w('floor2', 'left-wing-east-lower', -10.5, 8, 1.1, 9),
+    w('floor2', 'right-wing-west-upper', 10.5, -7, 1.1, 9), w('floor2', 'right-wing-west-lower', 10.5, 8, 1.1, 9),
+    w('floor2', 'central-north', 0, -7.7, 14, 1.1), w('floor2', 'central-south', 0, 7.7, 14, 1.1),
+    w('floor2', 'left-suite-split-a', -17, -5, 10, 1.1), w('floor2', 'left-suite-split-b', -17, 5, 10, 1.1),
+    w('floor2', 'right-suite-split-a', 17, -5, 10, 1.1), w('floor2', 'right-suite-split-b', 17, 5, 10, 1.1),
+    w('floor2', 'bath-south', 0, -10, 15, 1.1), w('floor2', 'balcony-north', 0, 10, 15, 1.1),
+    w('floor3', 'north-boundary-a', -12, -20, 24, 1.1), w('floor3', 'north-boundary-b', 12, -20, 24, 1.1),
+    w('floor3', 'south-boundary', 0, 20, 48, 1.1), w('floor3', 'west-boundary', -24, 0, 1.1, 40),
+    w('floor3', 'east-boundary', 24, 0, 1.1, 40), w('floor3', 'curved-left-facet', -14, -15.5, 1.1, 8),
+    w('floor3', 'curved-right-facet', 14, -15.5, 1.1, 8), w('floor3', 'curved-hall-south', 0, -8.5, 20, 1.1),
+    w('floor3', 'banquet-south', 0, 9, 20, 1.1), w('floor3', 'left-suite-east', -15, 3, 1.1, 10),
+    w('floor3', 'right-chamber-west', 15, 2, 1.1, 10), w('floor3', 'gallery-north', 0, 11.5, 12, 1.1)
+  ];
+
+  const doors = [
+    d('basement', 'west-dead-end-door', -13.5, -1, 'Basement West Dead-End Room', Math.PI / 2),
+    d('basement', 'bath-door', -13.5, 10, 'Basement Bath Utility', Math.PI / 2),
+    d('basement', 'security-door', 10.5, 1, 'Basement Security Room', Math.PI / 2),
+    d('floor1', 'reception-door', -6, -3.7, 'Front Desk Reception'),
+    d('floor1', 'back-office-door', -16.5, 7, 'Back Office', Math.PI / 2),
+    d('floor1', 'bath-door', 13.5, 8.5, 'Ground Bath Utility', Math.PI / 2),
+    d('floor2', 'left-upper-door', -10.5, -2, 'Floor 2 Left Guest Wing', Math.PI / 2),
+    d('floor2', 'right-upper-door', 10.5, -2, 'Floor 2 Right Guest Wing', Math.PI / 2),
+    d('floor2', 'left-suite-door', -12, 8, 'Floor 2 West Suite Loop'),
+    d('floor2', 'right-suite-door', 12, 8, 'Floor 2 East Suite Loop'),
+    d('floor3', 'left-suite-door', -15, 0, 'Floor 3 Left Suite', Math.PI / 2),
+    d('floor3', 'right-chamber-door', 15, 0, 'Floor 3 Right Chamber', Math.PI / 2)
+  ];
+
+  const puzzles = [
+    p('basement', 'basement_west', -18, -6, 'Basement West Dead-End Room', 0),
+    p('basement', 'basement_security', 17, -4, 'Basement Security Room', 1),
+    p('basement', 'basement_utility', 18, 10, 'Basement Staff Utility', 2),
+    p('floor1', 'floor1_lobby', -2, 3, 'Ground Lobby Hall', 3),
+    p('floor1', 'floor1_reception', -10, -7, 'Front Desk Reception', 4),
+    p('floor1', 'floor1_service', -20, 10, 'Back Office', 5),
+    p('floor2', 'floor2_left_wing', -18, -8, 'Floor 2 Left Guest Wing', 6),
+    p('floor2', 'floor2_left_loop', -20, 11, 'Floor 2 West Suite Loop', 7),
+    p('floor2', 'floor2_common', 0, 0, 'Floor 2 Central Common', 8),
+    p('floor2', 'floor2_right_wing', 18, -8, 'Floor 2 Right Guest Wing', 9),
+    p('floor2', 'floor2_right_loop', 20, 11, 'Floor 2 East Suite Loop', 10),
+    p('floor3', 'floor3_lounge', -4, 2, 'Floor 3 Banquet Lounge', 11),
+    p('floor3', 'floor3_curved_hall', 0, -13, 'Floor 3 Curved Hall', 12),
+    p('floor3', 'floor3_left_suite', -20, 3, 'Floor 3 Left Suite', 13),
+    p('floor3', 'floor3_right_chamber', 20, 2, 'Floor 3 Right Chamber', 14)
+  ];
+
+  const lights = [
+    l('basement', -12, -4, 0x6aa9ff, 0.34, 6.2, true), l('basement', 0, 0, 0x5d8cff, 0.32, 7.2, true),
+    l('basement', 17, -4, 0x67dfff, 0.36, 6.2), l('basement', 17, 10, 0xff3c55, 0.28, 5.5, true),
+    l('floor1', -8, -6, 0xd5aa67, 0.48, 7), l('floor1', 0, 3, 0xd5aa67, 0.55, 8),
+    l('floor1', 12, -5, 0xd5aa67, 0.45, 7), l('floor1', -18, 10, 0x6eeeff, 0.42, 6),
+    l('floor2', -17, -7, 0xc6b37a, 0.46, 7), l('floor2', 0, 0, 0xe0b66c, 0.54, 8),
+    l('floor2', 17, -7, 0xc6b37a, 0.46, 7), l('floor2', 0, 12, 0x6eeeff, 0.38, 6),
+    l('floor3', 0, -13, 0xe0b66c, 0.56, 8), l('floor3', 0, 2, 0xffc172, 0.62, 9),
+    l('floor3', -20, 3, 0x6eeeff, 0.38, 6), l('floor3', 20, 2, 0xff4967, 0.34, 6, true)
+  ];
+
+  // Stairs are currently explicit teleport stairwells. This keeps multi-floor
+  // traversal reliable with the existing first-person controller while leaving
+  // each connection visible and reusable for a future ramp implementation.
+  const stairConnections = [
+    { id: 'main_guest_f1_f2', name: 'Main guest stairs', from: { x: 1, y: 0, z: 3, floor: 'floor1', label: 'Floor 1' }, to: { x: 0, y: 4, z: 0, floor: 'floor2', label: 'Floor 2' } },
+    { id: 'main_guest_f2_f3', name: 'Main guest stairs', from: { x: 0, y: 4, z: 0, floor: 'floor2', label: 'Floor 2' }, to: { x: 1, y: 8, z: 2, floor: 'floor3', label: 'Floor 3' } },
+    { id: 'service_b_f0_f1', name: 'Service/back stairs', from: { x: -16, y: -4, z: 8, floor: 'basement', label: 'Basement' }, to: { x: -14, y: 0, z: 7, floor: 'floor1', label: 'Floor 1' } },
+    { id: 'service_b_f1_f2', name: 'Service/back stairs', from: { x: -14, y: 0, z: 7, floor: 'floor1', label: 'Floor 1' }, to: { x: -17, y: 4, z: 8, floor: 'floor2', label: 'Floor 2' } },
+    { id: 'emergency_c_f2_f3', name: 'Emergency stairs', from: { x: 18, y: 4, z: -4, floor: 'floor2', label: 'Floor 2' }, to: { x: 18, y: 8, z: -2, floor: 'floor3', label: 'Floor 3' } },
+    { id: 'basement_access_d', name: 'Basement access stairs', from: { x: -5, y: -4, z: 14, floor: 'basement', label: 'Basement' }, to: { x: -8, y: 0, z: 16, floor: 'floor1', label: 'Floor 1' } }
+  ];
+
+  return {
+    id: HOTEL_MAP_ID,
+    seed,
+    bounds: { x: 0, z: 0, w: 54, d: 48 },
+    floors,
+    rooms,
+    corridors,
+    grass: [],
+    walls,
+    doors,
+    props: [],
+    lights,
+    puzzles,
+    puzzleSlots: puzzles,
+    stairConnections,
+    survivorSpawns: [
+      { x: -3, y: 0, z: 15, floor: 'floor1' },
+      { x: 3, y: 0, z: 15, floor: 'floor1' },
+      { x: -16, y: 4, z: 12, floor: 'floor2' },
+      { x: 16, y: 4, z: 12, floor: 'floor2' }
+    ],
+    survivorSpawn: { x: -3, y: 0, z: 15 },
+    monsterSpawn: { x: 18, y: -4, z: -12, floor: 'basement' }
+  };
+}
+
 export function createMapLayout(mapId = DEFAULT_MAP_ID, seed = 0) {
   if (mapId === AMUSEMENT_PARK_MAP_ID) return createAmusementParkLayout(seed);
+  if (mapId === HOTEL_MAP_ID) return createHotelLayout(seed);
   return createDefaultBunkerLabLayout(seed);
 }

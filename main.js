@@ -21,7 +21,7 @@ import {
   setPuzzleActive,
   markPuzzleSolved,
   makeCorpse,
-  distance2D
+  distance3D
 } from './entities.js';
 
 const container = document.getElementById('game-container') || document.body;
@@ -75,7 +75,7 @@ let selectedMapId = DEFAULT_MAP_ID;
 let world = null;
 let puzzles = [];
 let colliders = [];
-let interactables = { doors: [], roomLabels: [] };
+let interactables = { doors: [], roomLabels: [], stairs: [] };
 let playerModel = createPlayerModel('survivor');
 let localHands = createLocalHands(camera, materials);
 localHands.visible = false;
@@ -408,12 +408,13 @@ function publishLobbyPresence() {
     monsterId: game?.monsterId || null,
     mapId: game?.waitingBetweenRounds ? selectedMapId : (game?.mapId || lobby?.mapId || selectedMapId),
     mapSeed: game?.mapSeed || null,
-    matchPlayers: game?.players?.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive })) || null,
+    matchPlayers: game?.players?.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, x: p.lastX, y: p.lastY, z: p.lastZ, yaw: p.lastYaw })) || null,
     roundState: game?.lastPublishedState || null,
     round: game?.round || 0,
     role: game?.local?.role || 'lobby',
     alive: game?.local?.alive ?? true,
     x: playerModel.position.x,
+    y: playerModel.position.y,
     z: playerModel.position.z,
     yaw: getLocalYaw()
   });
@@ -478,7 +479,7 @@ function joinLobbyObject(type, roomKey, options = {}) {
   room = db.joinRoom('rule-beast-vr', lobbyRoomId(type, roomKey));
   joinAttempts.set(roomKey, performance.now());
   ui.setLobby({ ...lobby, players: [{ id: myId, name: myName, connected: true, self: true, host: lobby.hostId === myId }], isHost: lobby.hostId === myId, canStart: false, mapId: selectedMapId, condition: lobby.hostId === myId ? 'Waiting for more players.' : 'Joining server…' });
-  room.publishPresence({ id: myId, name: myName, hostId: lobby.hostId, lobbyId: lobby.id, lobbyName: lobby.name, lobbyType: type, lobbyCode: code, lobbyState: lobby.state, connected: true, role: 'lobby', alive: true, mapId: selectedMapId, x: playerModel.position.x, z: playerModel.position.z, yaw: getLocalYaw() });
+  room.publishPresence({ id: myId, name: myName, hostId: lobby.hostId, lobbyId: lobby.id, lobbyName: lobby.name, lobbyType: type, lobbyCode: code, lobbyState: lobby.state, connected: true, role: 'lobby', alive: true, mapId: selectedMapId, x: playerModel.position.x, y: playerModel.position.y, z: playerModel.position.z, yaw: getLocalYaw() });
   room.subscribePresence({}, ({ user, peers }) => {
     if (!lobby) return;
     const peerValues = Object.values(peers || {});
@@ -503,6 +504,7 @@ function joinLobbyObject(type, roomKey, options = {}) {
         role: peer.role || game?.players.find((gp) => gp.id === (peer.id || peerKey))?.role || 'lobby',
         alive: peer.alive !== false,
         x: peer.x,
+        y: peer.y,
         z: peer.z,
         yaw: peer.yaw,
         roundState: peer.roundState,
@@ -739,12 +741,14 @@ function rebuildMap(seed, mapId = selectedMapId) {
 function placeLocalPlayerAtSpawn(layout) {
   if (!game) return;
   const survivorIndex = Math.max(0, game.players.filter((p) => p.id !== game.monsterId).findIndex((p) => p.id === myId));
-  const spawn = game.local.role === 'monster' ? layout.monsterSpawn : { x: layout.survivorSpawn.x + survivorIndex * 1.2, z: layout.survivorSpawn.z };
-  playerModel.position.set(spawn.x, 0, spawn.z);
+  const survivorSpawns = layout.survivorSpawns?.length ? layout.survivorSpawns : [layout.survivorSpawn];
+  const baseSpawn = game.local.role === 'monster' ? layout.monsterSpawn : survivorSpawns[survivorIndex % survivorSpawns.length];
+  const spawn = game.local.role === 'monster' ? baseSpawn : { ...baseSpawn, x: baseSpawn.x + (survivorIndex % survivorSpawns.length) * 0.6 };
+  playerModel.position.set(spawn.x, spawn.y || 0, spawn.z);
 }
 
 function startMatch(event) {
-  let baseRoster = event?.players?.length ? event.players : connectedPlayers().map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, x: p.x, z: p.z, yaw: p.yaw }));
+  let baseRoster = event?.players?.length ? event.players : connectedPlayers().map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, x: p.x, y: p.y, z: p.z, yaw: p.yaw }));
   if (!lobby) return;
   if (!baseRoster || baseRoster.length < 2) return;
   if (!baseRoster.some((p) => p.id === event.monsterId)) return;
@@ -767,7 +771,7 @@ function startMatch(event) {
   fpCamera.eyeHeight = localRole === 'monster' ? 2.05 : 1.55;
   fpCamera.enable();
   game = {
-    players: roster.map((p) => ({ ...p, role: p.role && p.role !== 'lobby' ? p.role : (p.id === event.monsterId ? 'monster' : 'survivor'), alive: p.alive !== false, lastX: Number.isFinite(p.x) ? p.x : undefined, lastZ: Number.isFinite(p.z) ? p.z : undefined, lastYaw: Number.isFinite(p.yaw) ? p.yaw : undefined })),
+    players: roster.map((p) => ({ ...p, role: p.role && p.role !== 'lobby' ? p.role : (p.id === event.monsterId ? 'monster' : 'survivor'), alive: p.alive !== false, lastX: Number.isFinite(p.x) ? p.x : undefined, lastY: Number.isFinite(p.y) ? p.y : undefined, lastZ: Number.isFinite(p.z) ? p.z : undefined, lastYaw: Number.isFinite(p.yaw) ? p.yaw : undefined })),
     local: { id: myId, name: myName, role: localRole, alive: roster.find((p) => p.id === myId)?.alive !== false, attackCooldown: 0, howlCooldown: 0 },
     monsterId: event.monsterId,
     mapId,
@@ -798,11 +802,11 @@ function startMatch(event) {
     showRoundIntermission(event.round || game.round);
   } else if (event.assignments) {
     applyRoundAssignments(event.assignments);
-    game.lastPublishedState = { type: 'round-state', round: game.round, abilities: event.abilities || [], assignments: event.assignments, players: game.players.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive })), monsterId: game.monsterId, mapId: game.mapId, mapSeed: game.mapSeed };
+    game.lastPublishedState = { type: 'round-state', round: game.round, abilities: event.abilities || [], assignments: event.assignments, players: roundPlayerSnapshots(), monsterId: game.monsterId, mapId: game.mapId, mapSeed: game.mapSeed };
   } else if (isHost()) {
     const assignments = randomRoundAssignments();
     applyRoundAssignments(assignments);
-    const players = game.players.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive }));
+    const players = roundPlayerSnapshots();
     const roundState = { type: 'round-state', round: 1, abilities: [], assignments, players, monsterId: game.monsterId, mapId: game.mapId, mapSeed: game.mapSeed };
     game.lastPublishedState = roundState;
     room?.publishTopic('lobby-event', roundState);
@@ -814,10 +818,51 @@ function startMatch(event) {
 }
 
 function randomRoundAssignments() {
-  const count = TUNING.minPuzzlesPerRound + Math.floor(Math.random() * (TUNING.maxPuzzlesPerRound - TUNING.minPuzzlesPerRound + 1));
+  const desiredCount = TUNING.minPuzzlesPerRound + Math.floor(Math.random() * (TUNING.maxPuzzlesPerRound - TUNING.minPuzzlesPerRound + 1));
+  const count = Math.min(desiredCount, puzzles.length);
   const puzzlePool = [...PUZZLE_TYPES].sort(() => Math.random() - 0.5).slice(0, count);
-  const stationPool = [...puzzles].sort(() => Math.random() - 0.5).slice(0, count);
+  const stationPool = spreadPuzzleStations(puzzles, count);
   return puzzlePool.map((type, index) => ({ stationId: stationPool[index].id, puzzleTypeId: type.id }));
+}
+
+function roundPlayerSnapshots() {
+  return game.players.map((p) => {
+    const local = p.id === myId;
+    return {
+      id: p.id,
+      name: p.name,
+      role: p.role,
+      alive: p.alive,
+      x: local ? playerModel.position.x : p.lastX,
+      y: local ? playerModel.position.y : p.lastY,
+      z: local ? playerModel.position.z : p.lastZ,
+      yaw: local ? getLocalYaw() : p.lastYaw
+    };
+  });
+}
+
+function spreadPuzzleStations(stations, count) {
+  const pool = [...stations].sort(() => Math.random() - 0.5);
+  const selected = [];
+  const usedFloors = new Set();
+  const usedZones = new Set();
+  const floorKey = (station) => station.floor || 'ground';
+  const zoneKey = (station) => `${floorKey(station)}:${station.zone || station.room || station.id}`;
+  const allFloors = new Set(pool.map(floorKey));
+  const allZones = new Set(pool.map(zoneKey));
+  while (selected.length < count && pool.length) {
+    const needsFloor = usedFloors.size < allFloors.size;
+    const needsZone = usedZones.size < allZones.size;
+    let index = pool.findIndex((station) => needsFloor && !usedFloors.has(floorKey(station)) && (!needsZone || !usedZones.has(zoneKey(station))));
+    if (index < 0 && needsFloor) index = pool.findIndex((station) => !usedFloors.has(floorKey(station)));
+    if (index < 0 && needsZone) index = pool.findIndex((station) => !usedZones.has(zoneKey(station)));
+    if (index < 0) index = 0;
+    const [station] = pool.splice(index, 1);
+    selected.push(station);
+    usedFloors.add(floorKey(station));
+    usedZones.add(zoneKey(station));
+  }
+  return selected;
 }
 
 function applyRoundAssignments(assignments) {
@@ -912,7 +957,7 @@ function startNextRoundFromIntermission() {
     placeLocalPlayerAtSpawn(layout);
   }
   const assignments = randomRoundAssignments();
-  const players = game.players.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive }));
+  const players = roundPlayerSnapshots();
   const roundState = { type: 'round-state', round: game.round, abilities: game.monsterAbilities, assignments, players, monsterId: game.monsterId, mapId: game.mapId, mapSeed: game.mapSeed };
   game.lastPublishedState = roundState;
   room.publishTopic('lobby-event', roundState);
@@ -928,7 +973,16 @@ function applyRoundState(event) {
     const previous = new Map(game.players.map((p) => [p.id, p]));
     game.players = event.players.map((p) => {
       const old = previous.get(p.id) || {};
-      return { ...old, ...p, role: p.role || (p.id === game.monsterId ? 'monster' : 'survivor'), alive: p.alive !== false, lastX: old.lastX, lastZ: old.lastZ, lastYaw: old.lastYaw };
+      return {
+        ...old,
+        ...p,
+        role: p.role || (p.id === game.monsterId ? 'monster' : 'survivor'),
+        alive: p.alive !== false,
+        lastX: Number.isFinite(p.x) ? p.x : old.lastX,
+        lastY: Number.isFinite(p.y) ? p.y : old.lastY,
+        lastZ: Number.isFinite(p.z) ? p.z : old.lastZ,
+        lastYaw: Number.isFinite(p.yaw) ? p.yaw : old.lastYaw
+      };
     });
     const localSnapshot = game.players.find((p) => p.id === myId);
     if (localSnapshot) game.local.alive = localSnapshot.alive !== false;
@@ -982,6 +1036,7 @@ function mergeLivePlayers(list) {
       existing.alive = p.alive !== false && existing.alive !== false;
       if (Number.isFinite(p.x) && Number.isFinite(p.z)) {
         existing.lastX = p.x;
+        existing.lastY = Number.isFinite(p.y) ? p.y : existing.lastY;
         existing.lastZ = p.z;
       }
       if (Number.isFinite(p.yaw)) existing.lastYaw = p.yaw;
@@ -1015,9 +1070,10 @@ function updateRemoteMarkers(players) {
       remoteMarkers.set(p.id, entry);
     }
     const x = Number.isFinite(source.x) ? source.x : known?.lastX;
+    const y = Number.isFinite(source.y) ? source.y : known?.lastY || 0;
     const z = Number.isFinite(source.z) ? source.z : known?.lastZ;
     const yaw = Number.isFinite(source.yaw) ? source.yaw : known?.lastYaw;
-    if (Number.isFinite(x) && Number.isFinite(z)) entry.object.position.set(x, 0, z);
+    if (Number.isFinite(x) && Number.isFinite(z)) entry.object.position.set(x, y, z);
     if (Number.isFinite(yaw)) entry.object.rotation.y = yaw;
     entry.object.visible = alive && Number.isFinite(x) && Number.isFinite(z);
   });
@@ -1031,7 +1087,7 @@ function updateRemoteMarkers(players) {
 
 function nearest(list, maxDistance) {
   if (!game) return null;
-  return list.map((item) => ({ item, d: distance2D(playerModel.position, item.position) })).filter((x) => x.d <= maxDistance).sort((a, b) => a.d - b.d)[0]?.item || null;
+  return list.map((item) => ({ item, d: distance3D(playerModel.position, item.position) })).filter((x) => x.d <= maxDistance).sort((a, b) => a.d - b.d)[0]?.item || null;
 }
 
 function setDoorOpen(door, open) {
@@ -1040,8 +1096,23 @@ function setDoorOpen(door, open) {
   door.mesh.material.emissiveIntensity = door.open ? 0.65 : 0.22;
 }
 
+function useStairs(stair) {
+  if (!stair?.target) return;
+  playerModel.position.set(stair.target.x, stair.target.y || 0, stair.target.z);
+  game.activeInteractPuzzleId = null;
+  game.interactHeld = 0;
+  resolveWalls(playerModel);
+  publishLobbyPresence();
+  ui.flash(`${stair.name}: ${stair.target.label || stair.target.floor}`);
+}
+
 function handleInteractTap() {
   if (!game || game.ended || game.waitingBetweenRounds || !game.local.alive) return;
+  const stair = nearest(interactables.stairs, 1.65);
+  if (stair) {
+    useStairs(stair);
+    return;
+  }
   const door = nearest(interactables.doors, 1.45);
   if (door) {
     setDoorOpen(door, !door.open);
@@ -1105,7 +1176,7 @@ function nearestRemoteSurvivor(maxDistance = 999) {
   remoteMarkers.forEach((entry, idKey) => {
     const player = game?.players.find((p) => p.id === idKey && p.role === 'survivor' && p.alive);
     if (!player || !entry.object.visible) return;
-    const d = distance2D(entry.object.position, playerModel.position);
+    const d = distance3D(entry.object.position, playerModel.position);
     if (d <= maxDistance && (!best || d < best.d)) best = { id: idKey, entry, player, d };
   });
   return best;
@@ -1153,7 +1224,7 @@ function applyAbilityImmediateEffect(ability) {
   }
   if (ability.id === 'door_slam' || ability.tags?.includes('door')) {
     interactables.doors.forEach((door) => {
-      if (distance2D(playerModel.position, door.position) < (ability.id === 'door_phase' ? 2.2 : 6.5)) {
+      if (distance3D(playerModel.position, door.position) < (ability.id === 'door_phase' ? 2.2 : 6.5)) {
         setDoorOpen(door, ability.id === 'door_phase' || ability.id === 'heavy_charge');
       }
     });
@@ -1213,7 +1284,7 @@ function tryAttack() {
   let victimId = null;
   remoteMarkers.forEach((entry, idKey) => {
     const player = game.players.find((p) => p.id === idKey && p.role === 'survivor' && p.alive);
-    if (player && distance2D(entry.object.position, playerModel.position) <= range) victimId = idKey;
+    if (player && distance3D(entry.object.position, playerModel.position) <= range) victimId = idKey;
   });
   if (victimId) {
     room?.publishTopic('lobby-event', { type: 'player-killed', playerId: victimId, byId: myId });
@@ -1259,6 +1330,7 @@ function resolveWalls(object) {
   pos.x = THREE.MathUtils.clamp(pos.x, -24.2, 24.2);
   pos.z = THREE.MathUtils.clamp(pos.z, -20.2, 20.2);
   for (const wall of colliders) {
+    if (Math.abs((pos.y || 0) - (wall.y || 0)) > 1.8) continue;
     const closestX = THREE.MathUtils.clamp(pos.x, wall.minX, wall.maxX);
     const closestZ = THREE.MathUtils.clamp(pos.z, wall.minZ, wall.maxZ);
     const dx = pos.x - closestX;
@@ -1308,7 +1380,7 @@ function updateLocal(delta) {
   }
   fpCamera.update();
   if (game.local.role === 'survivor' && game.local.alive && !game.waitingBetweenRounds && !isAnyMenuOpen()) {
-    const active = game.activePuzzles.find((p) => !p.solved && distance2D(playerModel.position, p.position) < 1.75);
+    const active = game.activePuzzles.find((p) => !p.solved && distance3D(playerModel.position, p.position) < 1.75);
     if (active && keys.has('KeyE')) {
       if (game.activeInteractPuzzleId !== active.id) {
         game.interactHeld = 0;
@@ -1347,7 +1419,7 @@ function updateEffects(delta) {
     if (puzzle.active && !puzzle.solved) puzzle.ring.rotation.z += delta * 1.9;
   });
   interactables.roomLabels.forEach(({ area, label }) => {
-    label.visible = Math.abs(playerModel.position.x - area.x) < area.w / 2 && Math.abs(playerModel.position.z - area.z) < area.d / 2;
+    label.visible = Math.abs((playerModel.position.y || 0) - (area.y || 0)) < 1.1 && Math.abs(playerModel.position.x - area.x) < area.w / 2 && Math.abs(playerModel.position.z - area.z) < area.d / 2;
   });
   if (game?.survivorDebuffs?.fog <= 0 && scene.fog) scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, 0.052, delta * 0.8);
   if (game) game.roundBannerTime = Math.max(0, game.roundBannerTime - delta);
@@ -1419,8 +1491,9 @@ function updateHud(delta) {
     publishLobbyPresence();
   }
   const remaining = game.activePuzzles.filter((p) => !p.solved).length;
-  const activeNear = game.activePuzzles.find((p) => !p.solved && distance2D(playerModel.position, p.position) < 1.75);
+  const activeNear = game.activePuzzles.find((p) => !p.solved && distance3D(playerModel.position, p.position) < 1.75);
   const door = nearest(interactables.doors, 1.45);
+  const stair = nearest(interactables.stairs, 1.65);
   const selected = selectedAbility();
   const selectedCooldown = selected ? Math.ceil(game.abilityCooldowns[selected.id] || 0) : 0;
   const vrHint = renderer.xr.isPresenting ? ' · VR left stick move · VR interact button repair/use · VR ability button use power · right stick cycle' : '';
@@ -1429,8 +1502,8 @@ function updateHud(delta) {
     : (game.monsterAbilities.length ? `Monster has unlocked powers.` : 'Monster has basic movement and attack only');
   let prompt = '';
   if (game.countdown > 0) prompt = `Round starts in ${Math.ceil(game.countdown)}… Survivors orient while Monster waits.`;
-  else if (game.local.role === 'survivor') prompt = !game.local.alive ? 'You are dead. Spectate the remaining real players.' : activeNear ? 'Hold E or the VR interact button to repair. Release or walk away resets progress.' : door ? `Press E to ${door.open ? 'close' : 'open'} ${door.room} door.` : `Find and complete ${remaining} glowing station${remaining === 1 ? '' : 's'}.`;
-  else prompt = `${door ? `Press E to ${door.open ? 'close' : 'open'} ${door.room} door. ` : ''}Hunt real survivors. Click/F/Space or the VR interact button grabs. Q or the VR ability button activates the selected power. R or the right stick cycles abilities.`;
+  else if (game.local.role === 'survivor') prompt = !game.local.alive ? 'You are dead. Spectate the remaining real players.' : activeNear ? 'Hold E or the VR interact button to repair. Release or walk away resets progress.' : stair ? `Press E to use ${stair.name} to ${stair.target.label || stair.target.floor}.` : door ? `Press E to ${door.open ? 'close' : 'open'} ${door.room} door.` : `Find and complete ${remaining} glowing station${remaining === 1 ? '' : 's'}.`;
+  else prompt = `${stair ? `Press E to use ${stair.name} to ${stair.target.label || stair.target.floor}. ` : door ? `Press E to ${door.open ? 'close' : 'open'} ${door.room} door. ` : ''}Hunt real survivors. Click/F/Space or the VR interact button grabs. Q or the VR ability button activates the selected power. R or the right stick cycles abilities.`;
   ui.update({ role: game.local.role, dead: !game.local.alive, round: game.round, abilities, puzzlesRemaining: remaining, objective: game.local.role === 'monster' ? 'Kill every real survivor.' : 'Complete the active cyan stations and survive through Round 10.', prompt, progress: activeNear?.progress || 0, warning: game.roundBannerTime > 0 ? (game.round === 1 ? 'ROUND 1: BASIC MOVEMENT AND ATTACK ONLY' : `MONSTER ABILITY: ${abilities}`) : '' });
 }
 

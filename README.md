@@ -18,9 +18,13 @@ Players create or join public/private lobbies through the main menu. The host ca
 
 Each round activates a random set of puzzle stations. Survivors win a round by completing all active stations. If they finish Round 10 with at least one Survivor alive, Survivors win the match. The Monster wins by killing every living Survivor. Between rounds, the game enters an intermission menu where players can join, the host can change maps, and the host starts the next round. On each new round after Round 1, the Monster unlocks a random ability from the ability pool.
 
-Available maps are `default_bunker_lab` and `amusement_park`. The bunker/lab map is a recreated top-down floorplan built from original Rule Beast geometry and materials. The amusement park map is a basic open layout with connected walking paths, grass sections, boundaries, spawn points, and puzzle stations only. Maps are defined in `maps.js` as rooms/path slabs, grass sections, wall colliders, doors, lights, puzzle station positions, and spawn points. Current maps intentionally have no non-collidable decorative props. Collision is simple 2D wall pushing against the map's wall boxes.
+Available maps are `default_bunker_lab`, `amusement_park`, and `hotel`. The bunker/lab map is a recreated top-down floorplan built from original Rule Beast geometry and materials. The amusement park map is a basic open layout with connected walking paths, grass sections, boundaries, spawn points, and puzzle stations only. The hotel map is a four-level layout with Basement, Floor 1, Floor 2, and Floor 3 stacked at different heights. Maps are defined in `maps.js` as floors, rooms/path slabs, grass sections, wall colliders, doors, lights, stair connections, puzzle slot metadata, and spawn points. Current maps intentionally have no non-collidable decorative props. Collision is simple wall pushing against the current floor's wall boxes.
 
 Wall segments are created through `createWallSegment`, which snaps wall boxes to a shared grid and slightly overlaps connected segments. Future maps should use that helper so visual walls and collision boxes connect without tiny seams.
+
+Puzzle stations include `floor` and `zone` metadata. Round selection uses that metadata to pick unused floors/zones first, then repeats only after it has spread active stations as widely as the current map allows.
+
+The hotel uses visible teleport stairwells as a reliable first pass for the existing first-person movement system. Main guest stairs connect Floor 1 to Floor 2 to Floor 3, service/back stairs connect Basement to Floor 1 to Floor 2, emergency stairs connect Floor 2 to Floor 3, and basement access stairs connect Basement to Floor 1.
 
 ## Controls
 
@@ -28,7 +32,7 @@ Desktop:
 
 - `WASD` or arrow keys: move.
 - Mouse click on the canvas: pointer-lock first-person look.
-- `E`: interact with nearby doors; Survivors hold `E` near an active cyan puzzle station to repair it.
+- `E`: interact with nearby doors or stairwells; Survivors hold `E` near an active cyan puzzle station to repair it.
 - Left click, `F`, or `Space`: Monster grab/attack.
 - `Q`: Monster activates the selected active ability.
 - `R`: Monster cycles unlocked abilities.
@@ -63,9 +67,9 @@ The Monster is controlled by a player, not by AI. Its base movement is slightly 
 ## Main Files
 
 - `index.html`: page shell, import map, CSS, containers, and script loading.
-- `main.js`: Three.js renderer/bootstrap, WebXR setup, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, movement/collision, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
-- `entities.js`: materials, default map loading, world geometry, rooms, corridors, walls, doors, lights, props, player/monster models, local hands, puzzle station meshes, remote markers, corpses, and distance helpers.
-- `maps.js`: map IDs/options, `default_bunker_lab` and `amusement_park` definitions, wall snapping/overlap helpers, map factory, room/path sizes, grass sections, wall colliders, doors, spawn points, puzzle station points, and light positions.
+- `main.js`: Three.js renderer/bootstrap, WebXR setup, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
+- `entities.js`: materials, map loading, multi-floor world geometry, rooms, corridors, walls, doors, stairwell markers, lights, props, player/monster models, local hands, puzzle station meshes, remote markers, corpses, and distance helpers.
+- `maps.js`: map IDs/options, `default_bunker_lab`, `amusement_park`, and `hotel` definitions, wall snapping/overlap helpers, map factory, floor heights, room/path sizes, grass sections, wall colliders, stair connections, doors, spawn points, puzzle station zones, and light positions.
 - `data.js`: lobby state constants, monster ability pool, puzzle type definitions, and game tuning constants.
 - `ui.js`: DOM menu, lobby, HUD, round menu, server menu, end screen, player rows, lobby browser, and flash messages.
 - `audio.js`: music/SFX path map, gesture-gated audio unlock, mute behavior, one-shot SFX, and procedural heartbeat.
@@ -84,7 +88,7 @@ The Monster is controlled by a player, not by AI. Its base movement is slightly 
 - `audio.js` creates a new `AudioContext` for each heartbeat pulse. This is simple but may be wasteful over long sessions.
 - The exported `public/index.html` redirects to `../index.html`; this is fine as a helper from the current structure but may be wrong if a future deploy uses `public/` as the web root.
 - The Windows build output is Electron packaging, not source. Do not edit or upload it as the primary project.
-- There are no automated tests or package scripts yet.
+- There is a small Node regression test file, but no package scripts or full gameplay automation yet.
 
 ## Run Locally
 
