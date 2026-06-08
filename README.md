@@ -24,7 +24,7 @@ Wall segments are created through `createWallSegment`, which snaps wall boxes to
 
 Puzzle stations include `floor` and `zone` metadata. Round selection uses that metadata to pick unused floors/zones first, then repeats only after it has spread active stations as widely as the current map allows.
 
-The hotel uses visible teleport stairwells as a reliable first pass for the existing first-person movement system. Main guest stairs connect Floor 1 to Floor 2 to Floor 3, service/back stairs connect Basement to Floor 1 to Floor 2, emergency stairs connect Floor 2 to Floor 3, and basement access stairs connect Basement to Floor 1.
+The hotel uses visible teleport stairwells as a reliable first pass for the existing first-person movement system. It intentionally avoids extra staircases: Basement connects to Floor 1, Floor 1 connects up to Floor 2, and Floor 2 connects up to Floor 3, leaving Floor 1 and Floor 2 with one up route and one down route each.
 
 ## Controls
 
@@ -64,12 +64,54 @@ The Monster is controlled by a player, not by AI. Its base movement is slightly 
 
 `main.js` also creates a VR menu layer in Three.js so menu choices can be selected from inside WebXR.
 
+## Admin Asset Editor
+
+Rule Beast includes a desktop-first, local-only Admin Asset Editor for building map drafts inside the running game. It is hidden by default and unlocks with the prototype admin code `rulebeast-editor`. This code is only a local prototype gate, not production security.
+
+Open the game, use the small Admin / Editor unlock box, enter the code, and the right-side editor panel appears with the indicator `EDITOR MODE ENABLED - LOCAL ONLY`. Close Editor hides the panel and returns normal gameplay controls. The editor does not upload files, use the GitHub API, use Cloudflare R2, or sync imported files through InstantDB.
+
+The object list is populated from the editable registry. Current maps register floors, room slabs, paths, grass, walls, doors, and simple props where available. Select an object from the dropdown or click a registered surface in the 3D scene while editor mode is enabled; selected objects get a yellow bounding-box highlight.
+
+Texture workflow:
+
+- Import `.png`, `.jpg`, `.jpeg`, or `.webp` from your computer.
+- Select a surface that supports textures.
+- Apply the texture, then adjust repeat X/Y, offset X/Y, and rotation in degrees.
+- Remove texture clears the local surface edit.
+
+GLB workflow:
+
+- Import `.glb` files only.
+- Choose the imported model and place it near the player.
+- Placed models are visual-only for now and do not add collision.
+- Use transform controls to move, rotate, scale, duplicate, delete, or move the selected model to the player.
+
+Local drafts:
+
+- Save Local Draft stores metadata in `localStorage` under `ruleBeastEditorDraftV1`.
+- Drafts do not store binary texture/model files or base64 data.
+- Loading a draft may show missing-file warnings because browser blob URLs are temporary and may not survive reloads.
+
+Manifest export/import:
+
+- Export Asset Manifest JSON downloads a readable manifest and fills the manifest textarea.
+- Copy Manifest uses the clipboard when available.
+- Import Manifest JSON is for local testing only. It applies edits only when the referenced local texture/model assets are present in the current browser session.
+- The manifest contains map id/name, texture metadata, model metadata, surface edits, placed model transforms, warnings, intended repo paths, and instructions for making the draft permanent.
+
+To make editor work permanent later, copy texture files into `assets/textures/`, copy GLB files into `assets/models/`, replace temporary blob URLs with repo asset paths, and give the exported manifest plus files to Codex for source integration. Imported assets remain local-only and are not visible to other multiplayer players until integrated into the repo.
+
 ## Main Files
 
 - `index.html`: page shell, import map, CSS, containers, and script loading.
-- `main.js`: Three.js renderer/bootstrap, WebXR setup, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
-- `entities.js`: materials, map loading, multi-floor world geometry, rooms, corridors, walls, doors, stairwell markers, lights, props, player/monster models, local hands, puzzle station meshes, remote markers, corpses, and distance helpers.
+- `main.js`: Three.js renderer/bootstrap, WebXR setup, local admin editor initialization, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
+- `entities.js`: materials, map loading, editable surface registration, multi-floor world geometry, rooms, corridors, walls, doors, stairwell markers, lights, props, player/monster models, local hands, puzzle station meshes, remote markers, corpses, and distance helpers.
 - `maps.js`: map IDs/options, `default_bunker_lab`, `amusement_park`, and `hotel` definitions, wall snapping/overlap helpers, map factory, floor heights, room/path sizes, grass sections, wall colliders, stair connections, doors, spawn points, puzzle station zones, and light positions.
+- `editor/assetEditor.js`: local-only editor coordinator for admin unlock, texture imports, GLB imports, transforms, canvas selection, draft actions, and manifest actions.
+- `editor/editorRegistry.js`: editable object registry, selection helpers, and BoxHelper highlighting.
+- `editor/editorState.js`: editor runtime state and metadata-only local draft save/load.
+- `editor/editorUI.js`: DOM editor unlock box and scrollable editor panel.
+- `editor/editorManifest.js`: manifest export, download, JSON parse, and manifest metadata helpers.
 - `data.js`: lobby state constants, monster ability pool, puzzle type definitions, and game tuning constants.
 - `ui.js`: DOM menu, lobby, HUD, round menu, server menu, end screen, player rows, lobby browser, and flash messages.
 - `audio.js`: music/SFX path map, gesture-gated audio unlock, mute behavior, one-shot SFX, and procedural heartbeat.

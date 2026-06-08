@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PUZZLE_TYPES } from './data.js';
 import { createMapLayout } from './maps.js';
+import { registerMapSurface, unregisterEditableObjectsBySource } from './editor/editorRegistry.js';
 
 const cyan = new THREE.Color(0x40f6ff);
 const red = new THREE.Color(0xff153e);
@@ -53,6 +54,9 @@ export function createWorld(scene, materials, layout) {
   const colliders = [];
   const interactables = { doors: [], roomLabels: [], stairs: [] };
   const add = (object) => { scene.add(object); objects.push(object); return object; };
+  const mapId = layout.id || 'map';
+  const stableId = (...parts) => parts.filter(Boolean).join('_').toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+  unregisterEditableObjectsBySource('built-in-map');
   const propMaterials = {
     crate: new THREE.MeshStandardMaterial({ color: 0x2b261d, roughness: 0.85, metalness: 0.05 }),
     server: new THREE.MeshStandardMaterial({ color: 0x0b1117, emissive: 0x032d36, emissiveIntensity: 0.35, roughness: 0.55, metalness: 0.45 }),
@@ -70,6 +74,16 @@ export function createWorld(scene, materials, layout) {
     const floor = add(new THREE.Mesh(new THREE.BoxGeometry(bounds.w, 0.28, bounds.d), materials.floor));
     floor.position.set(bounds.x || 0, (floorInfo.y || 0) - 0.14, bounds.z || 0);
     floor.receiveShadow = true;
+    registerMapSurface({
+      id: stableId(mapId, floorInfo.id || 'ground', 'floor_surface'),
+      type: 'floor',
+      category: 'surface',
+      mapId,
+      floor: floorInfo.id || 'ground',
+      zone: floorInfo.id || 'ground',
+      object3D: floor,
+      materialTarget: floor
+    });
     const grid = add(new THREE.GridHelper(bounds.w || 52, 26, 0x293142, 0x151b2a));
     grid.position.set(bounds.x || 0, (floorInfo.y || 0) + 0.025, bounds.z || 0);
   });
@@ -81,6 +95,15 @@ export function createWorld(scene, materials, layout) {
     const patch = add(new THREE.Mesh(new THREE.BoxGeometry(area.w, 0.03, area.d), mat));
     patch.position.set(area.x, (area.y || 0) + 0.01, area.z);
     patch.receiveShadow = true;
+    registerMapSurface({
+      id: stableId(mapId, area.floor || 'ground', 'grass', area.name),
+      type: 'grass',
+      mapId,
+      floor: area.floor || 'ground',
+      zone: area.name,
+      object3D: patch,
+      materialTarget: patch
+    });
   });
 
   layout.rooms.forEach((area) => {
@@ -88,6 +111,15 @@ export function createWorld(scene, materials, layout) {
     mat.color.setHex(area.color);
     const room = add(new THREE.Mesh(new THREE.BoxGeometry(area.w, 0.04, area.d), mat));
     room.position.set(area.x, (area.y || 0) + 0.005, area.z);
+    registerMapSurface({
+      id: stableId(mapId, area.floor || 'ground', 'room', area.name),
+      type: 'room-floor',
+      mapId,
+      floor: area.floor || 'ground',
+      zone: area.name,
+      object3D: room,
+      materialTarget: room
+    });
     const label = add(makeLabel(area.name, area.name.includes('Monster') ? '#ff4967' : '#93faff'));
     label.position.set(area.x, (area.y || 0) + 2.85, area.z);
     label.visible = false;
@@ -104,12 +136,39 @@ export function createWorld(scene, materials, layout) {
       hallX.position.set(midX, y + 0.012, from.z);
       const hallZ = add(new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.035, Math.abs(from.z - to.z) + 4), materials.room.clone()));
       hallZ.position.set(to.x, y + 0.014, midZ);
+      registerMapSurface({
+        id: stableId(mapId, path.floor || from.floor || 'ground', 'path', path.name, 'x'),
+        type: 'path',
+        mapId,
+        floor: path.floor || from.floor || 'ground',
+        zone: path.name,
+        object3D: hallX,
+        materialTarget: hallX
+      });
+      registerMapSurface({
+        id: stableId(mapId, path.floor || to.floor || 'ground', 'path', path.name, 'z'),
+        type: 'path',
+        mapId,
+        floor: path.floor || to.floor || 'ground',
+        zone: path.name,
+        object3D: hallZ,
+        materialTarget: hallZ
+      });
       return;
     }
     const mat = materials.room.clone();
     mat.color.setHex(path.color || 0x101820);
     const hall = add(new THREE.Mesh(new THREE.BoxGeometry(path.w, 0.035, path.d), mat));
     hall.position.set(path.x, (path.y || 0) + 0.014, path.z);
+    registerMapSurface({
+      id: stableId(mapId, path.floor || 'ground', 'path', path.name),
+      type: 'path',
+      mapId,
+      floor: path.floor || 'ground',
+      zone: path.name,
+      object3D: hall,
+      materialTarget: hall
+    });
   });
 
   layout.walls.forEach((wall, index) => {
@@ -119,6 +178,15 @@ export function createWorld(scene, materials, layout) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     colliders.push({ ...wall, y, minX: wall.x - wall.w / 2, maxX: wall.x + wall.w / 2, minZ: wall.z - wall.d / 2, maxZ: wall.z + wall.d / 2 });
+    registerMapSurface({
+      id: stableId(mapId, wall.floor || 'ground', 'wall', wall.id || index),
+      type: 'wall',
+      mapId,
+      floor: wall.floor || 'ground',
+      zone: wall.id || 'wall',
+      object3D: mesh,
+      materialTarget: mesh
+    });
     if (index > 3) {
       const trim = add(new THREE.Mesh(new THREE.BoxGeometry(wall.w + 0.05, 0.08, wall.d + 0.05), materials.wallTrim));
       trim.position.set(wall.x, y + 3.43, wall.z);
@@ -130,6 +198,15 @@ export function createWorld(scene, materials, layout) {
     mesh.position.set(door.x, (door.y || 0) + 1.15, door.z);
     mesh.rotation.y = door.rotation || 0;
     mesh.castShadow = true;
+    registerMapSurface({
+      id: stableId(mapId, door.floor || 'ground', 'door', door.id),
+      type: 'door',
+      mapId,
+      floor: door.floor || 'ground',
+      zone: door.room,
+      object3D: mesh,
+      materialTarget: mesh
+    });
     interactables.doors.push({ ...door, baseRotation: door.rotation || 0, mesh, open: false, position: new THREE.Vector3(door.x, door.y || 0, door.z) });
   });
 
@@ -161,6 +238,15 @@ export function createWorld(scene, materials, layout) {
     mesh.rotation.y = item.rotation || 0;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    registerMapSurface({
+      id: stableId(mapId, item.floor || 'ground', 'prop', item.type, item.x, item.z),
+      type: 'prop',
+      mapId,
+      floor: item.floor || 'ground',
+      zone: item.type,
+      object3D: mesh,
+      materialTarget: mesh
+    });
   });
 
   const lights = layout.lights?.length ? layout.lights : Array.from({ length: 26 }, (_, i) => ({

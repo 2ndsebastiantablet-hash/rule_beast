@@ -4,6 +4,11 @@ import { readFileSync } from 'node:fs';
 const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
 const index = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const entities = readFileSync(new URL('../entities.js', import.meta.url), 'utf8');
+const assetEditor = readFileSync(new URL('../editor/assetEditor.js', import.meta.url), 'utf8');
+const editorRegistry = readFileSync(new URL('../editor/editorRegistry.js', import.meta.url), 'utf8');
+const editorState = readFileSync(new URL('../editor/editorState.js', import.meta.url), 'utf8');
+const editorManifest = readFileSync(new URL('../editor/editorManifest.js', import.meta.url), 'utf8');
+const editorUI = readFileSync(new URL('../editor/editorUI.js', import.meta.url), 'utf8');
 const {
   DEFAULT_MAP_ID,
   MAP_OPTIONS,
@@ -72,13 +77,21 @@ assert.deepEqual(hotel.floors.map((floor) => [floor.id, floor.y]), [['basement',
 assert.ok(hotel.rooms.some((room) => room.name === 'Ground Lobby Hall'), 'hotel should include a ground-floor lobby layout');
 assert.ok(hotel.rooms.some((room) => room.name === 'Floor 2 Central Common'), 'hotel should include the balanced second-floor common area');
 assert.ok(hotel.rooms.some((room) => room.name === 'Floor 3 Curved Hall'), 'hotel should approximate the third-floor curved hall');
-assert.ok(hotel.stairConnections.length >= 6, 'hotel should include all requested stair route segments');
+assert.equal(hotel.stairConnections.length, 3, 'hotel should avoid extra stair route segments');
 assert.ok(hotel.stairConnections.some((stair) => stair.id === 'main_guest_f1_f2' && stair.from.floor === 'floor1' && stair.to.floor === 'floor2'), 'hotel should connect Floor 1 to Floor 2 via main guest stairs');
-assert.ok(hotel.stairConnections.some((stair) => stair.id === 'main_guest_f2_f3' && stair.from.floor === 'floor2' && stair.to.floor === 'floor3'), 'hotel should connect Floor 2 to Floor 3 via main guest stairs');
-assert.ok(hotel.stairConnections.some((stair) => stair.id === 'service_b_f0_f1' && stair.from.floor === 'basement' && stair.to.floor === 'floor1'), 'hotel should connect Basement to Floor 1 via service stairs');
-assert.ok(hotel.stairConnections.some((stair) => stair.id === 'service_b_f1_f2' && stair.from.floor === 'floor1' && stair.to.floor === 'floor2'), 'hotel should connect Floor 1 to Floor 2 via service stairs');
 assert.ok(hotel.stairConnections.some((stair) => stair.id === 'emergency_c_f2_f3' && stair.from.floor === 'floor2' && stair.to.floor === 'floor3'), 'hotel should connect Floor 2 to Floor 3 via emergency stairs');
 assert.ok(hotel.stairConnections.some((stair) => stair.id === 'basement_access_d' && stair.from.floor === 'basement' && stair.to.floor === 'floor1'), 'hotel should connect Basement to Floor 1 via basement access stairs');
+const stairEndpointsByFloor = new Map();
+hotel.stairConnections.forEach((stair) => {
+  [stair.from, stair.to].forEach((point) => {
+    stairEndpointsByFloor.set(point.floor, (stairEndpointsByFloor.get(point.floor) || 0) + 1);
+  });
+});
+assert.ok((stairEndpointsByFloor.get('basement') || 0) <= 2, 'basement should not have extra stair endpoints');
+assert.equal(stairEndpointsByFloor.get('floor1'), 2, 'Floor 1 should have only one up stair and one down stair endpoint');
+assert.equal(stairEndpointsByFloor.get('floor2'), 2, 'Floor 2 should have only one up stair and one down stair endpoint');
+assert.ok((stairEndpointsByFloor.get('floor3') || 0) <= 2, 'Floor 3 should not have extra stair endpoints');
+assert.ok(main.includes('setControllerGroundLevel'), 'stair and spawn movement should update controller ground level for multi-floor maps');
 assert.ok(new Set(hotel.puzzleSlots.map((slot) => slot.floor)).size === 4, 'hotel puzzle slots should cover basement, Floor 1, Floor 2, and Floor 3');
 assert.ok(new Set(hotel.puzzleSlots.map((slot) => `${slot.floor}:${slot.zone}`)).size >= 12, 'hotel puzzle slots should define many reusable floor/zone groups');
 assert.ok(hotel.survivorSpawns.some((spawn) => spawn.floor === 'floor1') && hotel.survivorSpawns.some((spawn) => spawn.floor === 'floor2'), 'hotel survivor spawns should be spread between Floor 1 and Floor 2');
@@ -90,3 +103,13 @@ assert.ok(main.includes('function spreadPuzzleStations'), 'round puzzle station 
 assert.ok(main.includes('distance3D'), 'multi-floor interaction should use 3D distance checks');
 assert.ok(main.includes('useStairs'), 'hotel stair endpoints should be usable during gameplay');
 assert.ok(entities.includes("from './maps.js'"), 'entities should use the dedicated default bunker map definition');
+assert.ok(index.includes('editor/assetEditor.js'), 'index should load the organized asset editor entry module');
+assert.ok(index.indexOf('type="importmap"') < index.indexOf('editor/assetEditor.js'), 'editor preload should stay after the importmap so bare Three.js imports resolve');
+assert.ok(main.includes('EDITOR_ADMIN_CODE'), 'main should expose a prototype-only editor admin unlock code');
+assert.ok(main.includes('initAssetEditor'), 'main should initialize the local-only asset editor');
+assert.ok(editorRegistry.includes('registerEditableObject') && editorRegistry.includes('selectEditableObject') && editorRegistry.includes('THREE.BoxHelper'), 'editor registry should expose selectable object helpers and highlighting');
+assert.ok(editorState.includes('EDITOR_DRAFT_STORAGE_KEY') && editorState.includes('localStorage.setItem') && !editorState.includes('base64'), 'editor state should save metadata-only local drafts');
+assert.ok(editorManifest.includes('Local blob URLs are temporary') && editorManifest.includes('permanentImportInstructions'), 'editor manifest should explain temporary local asset URLs');
+assert.ok(assetEditor.includes('GLTFLoader') && assetEditor.includes('URL.createObjectURL') && assetEditor.includes('visualOnly'), 'asset editor should support local GLB imports as visual-only placements');
+assert.ok(editorUI.includes('EDITOR MODE ENABLED - LOCAL ONLY') && editorUI.includes('Export Asset Manifest JSON'), 'editor UI should expose local-only mode and manifest controls');
+assert.ok(!`${assetEditor}\n${editorRegistry}\n${editorState}\n${editorManifest}\n${editorUI}`.match(/Cloudflare|R2|GitHub API|publishPresence|publishTopic/), 'editor modules must not implement cloud, GitHub API, or InstantDB publishing');

@@ -369,14 +369,11 @@ export function createHotelLayout(seed = 0) {
     l('floor3', -20, 3, 0x6eeeff, 0.38, 6), l('floor3', 20, 2, 0xff4967, 0.34, 6, true)
   ];
 
-  // Stairs are currently explicit teleport stairwells. This keeps multi-floor
-  // traversal reliable with the existing first-person controller while leaving
-  // each connection visible and reusable for a future ramp implementation.
+  // Stairs are currently explicit teleport stairwells. Each non-basement floor
+  // keeps at most one upward and one downward stair endpoint, so routes stay
+  // readable and the existing first-person controller does not need ramps yet.
   const stairConnections = [
     { id: 'main_guest_f1_f2', name: 'Main guest stairs', from: { x: 1, y: 0, z: 3, floor: 'floor1', label: 'Floor 1' }, to: { x: 0, y: 4, z: 0, floor: 'floor2', label: 'Floor 2' } },
-    { id: 'main_guest_f2_f3', name: 'Main guest stairs', from: { x: 0, y: 4, z: 0, floor: 'floor2', label: 'Floor 2' }, to: { x: 1, y: 8, z: 2, floor: 'floor3', label: 'Floor 3' } },
-    { id: 'service_b_f0_f1', name: 'Service/back stairs', from: { x: -16, y: -4, z: 8, floor: 'basement', label: 'Basement' }, to: { x: -14, y: 0, z: 7, floor: 'floor1', label: 'Floor 1' } },
-    { id: 'service_b_f1_f2', name: 'Service/back stairs', from: { x: -14, y: 0, z: 7, floor: 'floor1', label: 'Floor 1' }, to: { x: -17, y: 4, z: 8, floor: 'floor2', label: 'Floor 2' } },
     { id: 'emergency_c_f2_f3', name: 'Emergency stairs', from: { x: 18, y: 4, z: -4, floor: 'floor2', label: 'Floor 2' }, to: { x: 18, y: 8, z: -2, floor: 'floor3', label: 'Floor 3' } },
     { id: 'basement_access_d', name: 'Basement access stairs', from: { x: -5, y: -4, z: 14, floor: 'basement', label: 'Basement' }, to: { x: -8, y: 0, z: 16, floor: 'floor1', label: 'Floor 1' } }
   ];
@@ -402,7 +399,7 @@ export function createHotelLayout(seed = 0) {
       { x: -16, y: 4, z: 12, floor: 'floor2' },
       { x: 16, y: 4, z: 12, floor: 'floor2' }
     ],
-    survivorSpawn: { x: -3, y: 0, z: 15 },
+    survivorSpawn: { x: -3, y: 0, z: 15, floor: 'floor1' },
     monsterSpawn: { x: 18, y: -4, z: -12, floor: 'basement' }
   };
 }

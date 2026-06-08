@@ -5,6 +5,7 @@ import { INSTANT_DB_APP_ID } from './instant_db_config.js';
 import { PlayerController, FirstPersonCameraController } from './rosie/controls/rosieControls.js';
 import { AudioSystem } from './audio.js';
 import { GameUI } from './ui.js';
+import { initAssetEditor } from './editor/assetEditor.js';
 import { MONSTER_ABILITY_POOL, PUZZLE_TYPES, TUNING, LOBBY_STATES } from './data.js';
 import { DEFAULT_MAP_ID, MAP_OPTIONS } from './maps.js';
 import {
@@ -55,6 +56,8 @@ const db = init({ appId: INSTANT_DB_APP_ID });
 const myId = `player_${Math.random().toString(36).slice(2, 8)}`;
 let myName = ui.playerName();
 const INTERACT_KEY = 'KeyE';
+// Prototype-only local unlock. This is not production security and does not grant cloud or GitHub upload access.
+const EDITOR_ADMIN_CODE = 'rulebeast-editor';
 const keys = new Set();
 const remoteMarkers = new Map();
 const vrControllers = [];
@@ -73,6 +76,7 @@ let lobby = null;
 let game = null;
 let selectedMapId = DEFAULT_MAP_ID;
 let world = null;
+let currentLayout = null;
 let puzzles = [];
 let colliders = [];
 let interactables = { doors: [], roomLabels: [], stairs: [] };
@@ -82,6 +86,12 @@ localHands.visible = false;
 scene.add(playerModel);
 let controller = new PlayerController(playerModel, { moveSpeed: TUNING.survivorSpeed, jumpSpeed: 0, groundLevel: 0, cameraMode: 'first-person', rotateToMovement: false, mobileControls: false });
 let fpCamera = new FirstPersonCameraController(camera, playerModel, renderer.domElement, { enabled: false, eyeHeight: 1.55, mouseSensitivity: 0.0022 });
+let assetEditor = null;
+
+function setControllerGroundLevel(y = 0) {
+  controller.groundLevel = y;
+  if (controller.velocity) controller.velocity.y = 0;
+}
 
 function setupVRControllers() {
   if (!navigator.xr) return;
@@ -133,6 +143,17 @@ function resizeRenderer() {
 }
 window.addEventListener('resize', resizeRenderer);
 resizeRenderer();
+
+assetEditor = initAssetEditor({
+  scene,
+  camera,
+  renderer,
+  adminCode: EDITOR_ADMIN_CODE,
+  getCurrentMapId: () => selectedMapId,
+  getCurrentMapName: () => MAP_OPTIONS.find((map) => map.id === selectedMapId)?.name || selectedMapId,
+  getCurrentMapLayout: () => currentLayout,
+  getPlayerPosition: () => playerModel.position.clone()
+});
 
 function isInteractKey(event) {
   return event.code === INTERACT_KEY || event.key?.toLowerCase() === 'e';
@@ -731,10 +752,12 @@ function rebuildMap(seed, mapId = selectedMapId) {
   clearPuzzles(puzzles);
   const layout = generateMapLayout(seed, mapId);
   selectedMapId = layout.id || validMapId(mapId);
+  currentLayout = layout;
   world = createWorld(scene, materials, layout);
   colliders = world.colliders;
   interactables = world.interactables;
   puzzles = createPuzzleStations(scene, materials, layout);
+  assetEditor?.refreshObjects?.();
   return layout;
 }
 
@@ -745,6 +768,7 @@ function placeLocalPlayerAtSpawn(layout) {
   const baseSpawn = game.local.role === 'monster' ? layout.monsterSpawn : survivorSpawns[survivorIndex % survivorSpawns.length];
   const spawn = game.local.role === 'monster' ? baseSpawn : { ...baseSpawn, x: baseSpawn.x + (survivorIndex % survivorSpawns.length) * 0.6 };
   playerModel.position.set(spawn.x, spawn.y || 0, spawn.z);
+  setControllerGroundLevel(spawn.y || 0);
 }
 
 function startMatch(event) {
@@ -1099,6 +1123,7 @@ function setDoorOpen(door, open) {
 function useStairs(stair) {
   if (!stair?.target) return;
   playerModel.position.set(stair.target.x, stair.target.y || 0, stair.target.z);
+  setControllerGroundLevel(stair.target.y || 0);
   game.activeInteractPuzzleId = null;
   game.interactHeld = 0;
   resolveWalls(playerModel);
