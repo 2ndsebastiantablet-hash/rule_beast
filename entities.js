@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PUZZLE_TYPES } from './data.js';
-import { createDefaultBunkerLabLayout } from './maps.js';
+import { createMapLayout } from './maps.js';
 
 const cyan = new THREE.Color(0x40f6ff);
 const red = new THREE.Color(0xff153e);
@@ -40,8 +40,8 @@ function makeLabel(text, color = '#7df8ff') {
   return sprite;
 }
 
-export function generateMapLayout(seed) {
-  return createDefaultBunkerLabLayout(seed);
+export function generateMapLayout(seed, mapId) {
+  return createMapLayout(mapId, seed);
 }
 
 export function clearWorld(world) {
@@ -67,6 +67,15 @@ export function createWorld(scene, materials, layout) {
   const floor = add(new THREE.Mesh(new THREE.BoxGeometry(floorBounds.w, 0.28, floorBounds.d), materials.floor));
   floor.position.set(floorBounds.x || 0, -0.14, floorBounds.z || 0);
   floor.receiveShadow = true;
+
+  (layout.grass || []).forEach((area) => {
+    const mat = materials.room.clone();
+    mat.color.setHex(area.color || 0x102817);
+    mat.opacity = 0.9;
+    const patch = add(new THREE.Mesh(new THREE.BoxGeometry(area.w, 0.03, area.d), mat));
+    patch.position.set(area.x, 0.01, area.z);
+    patch.receiveShadow = true;
+  });
 
   layout.rooms.forEach((area) => {
     const mat = materials.room.clone();

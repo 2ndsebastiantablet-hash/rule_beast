@@ -14,6 +14,7 @@ export class GameUI {
     this.onCloseServerMenu = null;
     this.onKick = null;
     this.onBan = null;
+    this.onMapSelected = null;
     this.muted = false;
     this.root.innerHTML = `
       <section id="main-menu" class="panel lobby menu-panel">
@@ -41,7 +42,8 @@ export class GameUI {
           <div><strong>Players</strong><span id="player-count">1/4</span></div>
           <div id="code-wrap"><strong>Private Code</strong><span id="lobby-code">------</span></div>
         </div>
-        <div class="settings-card">Max players: 4 · Rounds: 10 · Monster: Random real player · Map: Random generated per game · Puzzles: 5–10 per round</div>
+        <div class="settings-card">Max players: 4 · Rounds: 10 · Monster: Random real player · Map: Host selected · Puzzles: 5–10 per round</div>
+        <label class="map-picker">Map <select id="lobby-map-select"></select></label>
         <div class="actions compact">
           <button id="copy-code">Copy Code</button>
           <button id="start-game">Start Game</button>
@@ -65,6 +67,7 @@ export class GameUI {
         <div class="eyebrow">ROUND COMPLETE</div>
         <h2 id="round-menu-title">Between Rounds</h2>
         <p id="round-menu-copy">Players may join between rounds. Host controls the next round.</p>
+        <label class="map-picker">Map <select id="round-map-select"></select></label>
         <div id="round-player-list" class="presence"></div>
         <div class="actions compact">
           <button id="start-next-round">Start Next Round</button>
@@ -103,6 +106,7 @@ export class GameUI {
     this.menuMessage = this.root.querySelector('#menu-message');
     this.publicList = this.root.querySelector('#public-list');
     this.progressMeter = this.root.querySelector('.meter');
+    this.mapSelects = [this.root.querySelector('#lobby-map-select'), this.root.querySelector('#round-map-select')];
 
     this.root.querySelector('#player-name').value = localStorage.getItem('ruleBeastName') || '';
     this.root.querySelector('#refresh-public').addEventListener('click', () => this.onRefreshPublic?.());
@@ -118,6 +122,9 @@ export class GameUI {
     this.root.querySelector('#close-server-menu').addEventListener('click', () => this.onCloseServerMenu?.());
     this.root.querySelector('#server-leave').addEventListener('click', () => this.onLeaveLobby?.());
     this.root.querySelector('#back-menu').addEventListener('click', () => this.showMain('Match ended. Create or join another lobby for a new generated map.'));
+    this.mapSelects.forEach((select) => {
+      select.addEventListener('change', () => this.onMapSelected?.(select.value));
+    });
   }
 
   playerName() {
@@ -131,6 +138,20 @@ export class GameUI {
 
   privateCode() { return this.root.querySelector('#private-code').value.trim().toUpperCase(); }
   setMenuMessage(message) { this.menuMessage.textContent = message; }
+
+  setMapOptions(options, selectedId) {
+    this.mapSelects.forEach((select) => {
+      select.innerHTML = options.map((map) => `<option value="${map.id}">${map.name}</option>`).join('');
+      select.value = selectedId;
+    });
+  }
+
+  setMapSelection(selectedId, isHost) {
+    this.mapSelects.forEach((select) => {
+      select.value = selectedId;
+      select.disabled = !isHost;
+    });
+  }
 
   setPublicLobbies(lobbies) {
     this.publicList.innerHTML = lobbies.length ? lobbies.map((lobby) => `
@@ -184,6 +205,7 @@ export class GameUI {
     this.root.querySelector('#copy-code').classList.toggle('hidden', state.type !== 'Private');
     this.root.querySelector('#start-game').classList.toggle('hidden', !state.isHost);
     this.root.querySelector('#start-game').disabled = !state.canStart;
+    this.setMapSelection(state.mapId, state.isHost);
     this.presence.innerHTML = state.players.map((p) => `
       <div class="player-row ${p.self ? 'self' : ''}">
         <span>${p.host ? '👑 ' : ''}${p.name}${p.self ? ' (you)' : ''}</span>
@@ -219,6 +241,7 @@ export class GameUI {
       : `${state.players.length} players are in the server. You can wait or leave the server.`;
     this.root.querySelector('#start-next-round').textContent = state.roundCompleted > 0 ? 'Next Round' : 'Start Game';
     this.root.querySelector('#start-next-round').classList.toggle('hidden', !state.isHost);
+    this.setMapSelection(state.mapId, state.isHost);
     this.root.querySelector('#round-player-list').innerHTML = state.players.map((p) => `
       <div class="player-row ${p.self ? 'self' : ''}">
         <span>${p.host ? '👑 ' : ''}${p.name}${p.self ? ' (you)' : ''}</span>

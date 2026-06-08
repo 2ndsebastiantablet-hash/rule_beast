@@ -6,6 +6,7 @@ import { PlayerController, FirstPersonCameraController } from './rosie/controls/
 import { AudioSystem } from './audio.js';
 import { GameUI } from './ui.js';
 import { MONSTER_ABILITY_POOL, PUZZLE_TYPES, TUNING, LOBBY_STATES } from './data.js';
+import { DEFAULT_MAP_ID, MAP_OPTIONS } from './maps.js';
 import {
   createMaterials,
   createWorld,
@@ -48,6 +49,7 @@ const timer = new THREE.Timer();
 const materials = createMaterials();
 const audio = new AudioSystem();
 const ui = new GameUI(audio);
+ui.setMapOptions(MAP_OPTIONS, DEFAULT_MAP_ID);
 const db = init({ appId: INSTANT_DB_APP_ID });
 
 const myId = `player_${Math.random().toString(36).slice(2, 8)}`;
@@ -69,6 +71,7 @@ let directoryRoom = null;
 let room = null;
 let lobby = null;
 let game = null;
+let selectedMapId = DEFAULT_MAP_ID;
 let world = null;
 let puzzles = [];
 let colliders = [];
@@ -183,6 +186,18 @@ function lobbyConditionText() {
   if (players.length < 2) return 'Waiting for more players.';
   if (!isHost()) return 'Waiting for host to start the game.';
   return canStart() ? 'Host can start the game.' : 'Start requirements not met.';
+}
+
+function validMapId(mapId) {
+  return MAP_OPTIONS.some((map) => map.id === mapId) ? mapId : DEFAULT_MAP_ID;
+}
+
+function setSelectedMap(mapId, publish = true) {
+  selectedMapId = validMapId(mapId);
+  if (lobby) lobby.mapId = selectedMapId;
+  ui.setMapSelection(selectedMapId, isHost());
+  if (publish) publishLobbyPresence();
+  refreshVRMenu();
 }
 
 function isAnyMenuOpen() {
@@ -363,6 +378,7 @@ function presentLobby() {
     players: rows,
     isHost: isHost(),
     canStart: canStart(),
+    mapId: lobby.mapId || selectedMapId,
     condition: lobbyConditionText()
   });
   refreshServerMenuIfOpen();
@@ -390,6 +406,7 @@ function publishLobbyPresence() {
     lobbyCode: lobby.code,
     lobbyState: lobby.state,
     monsterId: game?.monsterId || null,
+    mapId: game?.waitingBetweenRounds ? selectedMapId : (game?.mapId || lobby?.mapId || selectedMapId),
     mapSeed: game?.mapSeed || null,
     matchPlayers: game?.players?.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive })) || null,
     roundState: game?.lastPublishedState || null,
@@ -414,6 +431,7 @@ function publishDirectory() {
     type: 'Public',
     count,
     state: count >= 4 ? 'Full' : lobby.state,
+    mapId: lobby.mapId || selectedMapId,
     joinable: count < 4 && (lobby.state === LOBBY_STATES.WAITING || lobby.state === LOBBY_STATES.INTERMISSION)
   });
 }
@@ -454,12 +472,13 @@ function joinLobbyObject(type, roomKey, options = {}) {
     code,
     state: LOBBY_STATES.WAITING,
     hostId: options.hostId === null ? '' : (options.hostId || myId),
+    mapId: selectedMapId,
     players: [{ id: myId, name: myName, connected: true }]
   };
   room = db.joinRoom('rule-beast-vr', lobbyRoomId(type, roomKey));
   joinAttempts.set(roomKey, performance.now());
-  ui.setLobby({ ...lobby, players: [{ id: myId, name: myName, connected: true, self: true, host: lobby.hostId === myId }], isHost: lobby.hostId === myId, canStart: false, condition: lobby.hostId === myId ? 'Waiting for more players.' : 'Joining server…' });
-  room.publishPresence({ id: myId, name: myName, hostId: lobby.hostId, lobbyId: lobby.id, lobbyName: lobby.name, lobbyType: type, lobbyCode: code, lobbyState: lobby.state, connected: true, role: 'lobby', alive: true, x: playerModel.position.x, z: playerModel.position.z, yaw: getLocalYaw() });
+  ui.setLobby({ ...lobby, players: [{ id: myId, name: myName, connected: true, self: true, host: lobby.hostId === myId }], isHost: lobby.hostId === myId, canStart: false, mapId: selectedMapId, condition: lobby.hostId === myId ? 'Waiting for more players.' : 'Joining server…' });
+  room.publishPresence({ id: myId, name: myName, hostId: lobby.hostId, lobbyId: lobby.id, lobbyName: lobby.name, lobbyType: type, lobbyCode: code, lobbyState: lobby.state, connected: true, role: 'lobby', alive: true, mapId: selectedMapId, x: playerModel.position.x, z: playerModel.position.z, yaw: getLocalYaw() });
   room.subscribePresence({}, ({ user, peers }) => {
     if (!lobby) return;
     const peerValues = Object.values(peers || {});
@@ -467,6 +486,8 @@ function joinLobbyObject(type, roomKey, options = {}) {
     const advertisedHostId = allPresence.map((peer) => peer?.hostId).find(Boolean);
     if (!lobby.hostId && advertisedHostId) lobby.hostId = advertisedHostId;
     const hostPresence = allPresence.find((peer) => peer?.id === lobby.hostId) || allPresence.find((peer) => peer?.hostId && peer.hostId === lobby.hostId);
+    if (hostPresence?.mapId && !isHost()) setSelectedMap(hostPresence.mapId, false);
+    else if (isHost()) lobby.mapId = selectedMapId;
     const advertisedState = hostPresence?.lobbyState || allPresence.map((peer) => peer?.lobbyState).find((state) => state === LOBBY_STATES.IN_MATCH || state === LOBBY_STATES.INTERMISSION || state === LOBBY_STATES.ENDED);
     if (advertisedState && advertisedState !== LOBBY_STATES.CLOSED) lobby.state = advertisedState;
     const hostSnapshot = hostPresence?.mapSeed && hostPresence?.monsterId ? hostPresence : allPresence.find((peer) => peer?.hostId && peer.hostId === (lobby.hostId || peer.id) && peer?.mapSeed && peer?.monsterId);
@@ -485,6 +506,7 @@ function joinLobbyObject(type, roomKey, options = {}) {
         z: peer.z,
         yaw: peer.yaw,
         roundState: peer.roundState,
+        mapId: peer.mapId,
         mapSeed: peer.mapSeed,
         monsterId: peer.monsterId
       });
@@ -522,7 +544,7 @@ function joinLobbyObject(type, roomKey, options = {}) {
       return;
     }
     if (!game && advertisedState === LOBBY_STATES.IN_MATCH && hostSnapshot?.mapSeed && hostSnapshot?.monsterId && hostSnapshot.roundState) {
-      startMatch({ ...hostSnapshot.roundState, players: hostSnapshot.matchPlayers || hostSnapshot.roundState.players, monsterId: hostSnapshot.monsterId, mapSeed: hostSnapshot.mapSeed, round: hostSnapshot.round || hostSnapshot.roundState.round });
+      startMatch({ ...hostSnapshot.roundState, players: hostSnapshot.matchPlayers || hostSnapshot.roundState.players, monsterId: hostSnapshot.monsterId, mapId: hostSnapshot.mapId || hostSnapshot.roundState.mapId, mapSeed: hostSnapshot.mapSeed, round: hostSnapshot.round || hostSnapshot.roundState.round });
     } else if (!game && advertisedState === LOBBY_STATES.INTERMISSION && hostSnapshot?.mapSeed && hostSnapshot?.monsterId) {
       if (otherPlayerCount >= TUNING.maxPlayers) {
         ui.showMain('That server is full.');
@@ -533,6 +555,7 @@ function joinLobbyObject(type, roomKey, options = {}) {
       startMatch({
         players: hostSnapshot.matchPlayers || list.map((p) => ({ id: p.id, name: p.name })),
         monsterId: hostSnapshot.monsterId,
+        mapId: hostSnapshot.mapId,
         mapSeed: hostSnapshot.mapSeed,
         round: hostSnapshot.round || 1,
         intermission: true
@@ -625,6 +648,12 @@ ui.onStartNextRound = () => {
   startNextRoundFromIntermission();
 };
 ui.onCloseServerMenu = () => closeServerMenu();
+ui.onMapSelected = (mapId) => {
+  if (!isHost()) return;
+  setSelectedMap(mapId);
+  presentLobby();
+  if (game?.waitingBetweenRounds) showRoundIntermission();
+};
 ui.onStartGame = () => {
   if (!isHost()) { ui.flash('Only the host can start the game.'); return; }
   if (!canStart()) { ui.flash(lobbyConditionText()); return; }
@@ -633,8 +662,9 @@ ui.onStartGame = () => {
   if (!monster || players.length < 2) { ui.flash('Waiting for more players.'); return; }
   const matchSeed = Date.now() % 1000000;
   const mapSeed = Math.floor(Math.random() * 999999);
-  room.publishTopic('lobby-event', { type: 'match-start', players, monsterId: monster.id, matchSeed, mapSeed });
-  startMatch({ players, monsterId: monster.id, matchSeed, mapSeed });
+  const mapId = selectedMapId;
+  room.publishTopic('lobby-event', { type: 'match-start', players, monsterId: monster.id, matchSeed, mapSeed, mapId });
+  startMatch({ players, monsterId: monster.id, matchSeed, mapSeed, mapId });
 };
 ui.onKick = (targetId) => {
   if (!isHost()) return;
@@ -694,15 +724,23 @@ function toggleServerMenu() {
   else closeServerMenu();
 }
 
-function rebuildMap(seed) {
+function rebuildMap(seed, mapId = selectedMapId) {
   clearWorld(world);
   clearPuzzles(puzzles);
-  const layout = generateMapLayout(seed);
+  const layout = generateMapLayout(seed, mapId);
+  selectedMapId = layout.id || validMapId(mapId);
   world = createWorld(scene, materials, layout);
   colliders = world.colliders;
   interactables = world.interactables;
   puzzles = createPuzzleStations(scene, materials, layout);
   return layout;
+}
+
+function placeLocalPlayerAtSpawn(layout) {
+  if (!game) return;
+  const survivorIndex = Math.max(0, game.players.filter((p) => p.id !== game.monsterId).findIndex((p) => p.id === myId));
+  const spawn = game.local.role === 'monster' ? layout.monsterSpawn : { x: layout.survivorSpawn.x + survivorIndex * 1.2, z: layout.survivorSpawn.z };
+  playerModel.position.set(spawn.x, 0, spawn.z);
 }
 
 function startMatch(event) {
@@ -715,14 +753,14 @@ function startMatch(event) {
   const roster = baseRoster.some((p) => p.id === myId) ? baseRoster : [...baseRoster, { id: myId, name: myName, role: 'survivor', alive: true, lateJoin: true }];
   const localRole = event.monsterId === myId ? 'monster' : 'survivor';
   lobby.state = event.intermission ? LOBBY_STATES.INTERMISSION : LOBBY_STATES.IN_MATCH;
-  const layout = rebuildMap(event.mapSeed || Date.now());
+  const mapId = validMapId(event.mapId || selectedMapId);
+  const layout = rebuildMap(event.mapSeed || Date.now(), mapId);
+  selectedMapId = mapId;
+  if (lobby) lobby.mapId = mapId;
   fpCamera.disable();
   playerModel.clear();
   const fresh = createPlayerModel(localRole);
   fresh.children.slice().forEach((child) => playerModel.add(child));
-  const survivorIndex = Math.max(0, roster.filter((p) => p.id !== event.monsterId).findIndex((p) => p.id === myId));
-  const spawn = localRole === 'monster' ? layout.monsterSpawn : { x: layout.survivorSpawn.x + survivorIndex * 1.2, z: layout.survivorSpawn.z };
-  playerModel.position.set(spawn.x, 0, spawn.z);
   playerModel.visible = true;
   controller.setEnabled(true);
   controller.moveSpeed = localRole === 'monster' ? TUNING.monsterBaseSpeed : TUNING.survivorSpeed;
@@ -732,6 +770,7 @@ function startMatch(event) {
     players: roster.map((p) => ({ ...p, role: p.role && p.role !== 'lobby' ? p.role : (p.id === event.monsterId ? 'monster' : 'survivor'), alive: p.alive !== false, lastX: Number.isFinite(p.x) ? p.x : undefined, lastZ: Number.isFinite(p.z) ? p.z : undefined, lastYaw: Number.isFinite(p.yaw) ? p.yaw : undefined })),
     local: { id: myId, name: myName, role: localRole, alive: roster.find((p) => p.id === myId)?.alive !== false, attackCooldown: 0, howlCooldown: 0 },
     monsterId: event.monsterId,
+    mapId,
     mapSeed: event.mapSeed || Date.now(),
     round: event.round || 1,
     activePuzzles: [],
@@ -750,6 +789,7 @@ function startMatch(event) {
     waitingBetweenRounds: false,
     lastPublishedState: null
   };
+  placeLocalPlayerAtSpawn(layout);
   controller.setEnabled(game.local.alive && !event.intermission);
   if (!game.local.alive) fpCamera.eyeHeight = 1.25;
   updateRemoteMarkers(connectedPlayers());
@@ -758,12 +798,12 @@ function startMatch(event) {
     showRoundIntermission(event.round || game.round);
   } else if (event.assignments) {
     applyRoundAssignments(event.assignments);
-    game.lastPublishedState = { type: 'round-state', round: game.round, abilities: event.abilities || [], assignments: event.assignments, players: game.players.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive })), monsterId: game.monsterId, mapSeed: game.mapSeed };
+    game.lastPublishedState = { type: 'round-state', round: game.round, abilities: event.abilities || [], assignments: event.assignments, players: game.players.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive })), monsterId: game.monsterId, mapId: game.mapId, mapSeed: game.mapSeed };
   } else if (isHost()) {
     const assignments = randomRoundAssignments();
     applyRoundAssignments(assignments);
     const players = game.players.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive }));
-    const roundState = { type: 'round-state', round: 1, abilities: [], assignments, players, monsterId: game.monsterId, mapSeed: game.mapSeed };
+    const roundState = { type: 'round-state', round: 1, abilities: [], assignments, players, monsterId: game.monsterId, mapId: game.mapId, mapSeed: game.mapSeed };
     game.lastPublishedState = roundState;
     room?.publishTopic('lobby-event', roundState);
   }
@@ -840,7 +880,7 @@ function showRoundIntermission(roundCompleted = game?.round || 1) {
     const gp = game.players.find((item) => item.id === p.id) || p;
     return { ...p, role: gp.role, alive: gp.alive, self: p.id === myId, host: p.id === lobby.hostId };
   });
-  ui.showRoundMenu({ roundCompleted, players, isHost: isHost() });
+  ui.showRoundMenu({ roundCompleted, players, isHost: isHost(), mapId: selectedMapId });
   refreshServerMenuIfOpen();
 }
 
@@ -856,15 +896,24 @@ function startNextRoundFromIntermission() {
   game.waitingBetweenRounds = false;
   lobby.state = LOBBY_STATES.IN_MATCH;
   game.round += 1;
+  const nextMapId = validMapId(selectedMapId);
+  lobby.mapId = nextMapId;
+  const nextMapSeed = nextMapId === game.mapId ? game.mapSeed : Math.floor(Math.random() * 999999);
   const index = Math.floor(Math.random() * game.availableAbilities.length);
   const unlocked = game.availableAbilities[index] ? game.availableAbilities.splice(index, 1)[0] : null;
   if (unlocked) {
     game.monsterAbilities.push(unlocked);
     game.selectedAbilityIndex = game.monsterAbilities.length - 1;
   }
+  if (nextMapId !== game.mapId) {
+    const layout = rebuildMap(nextMapSeed, nextMapId);
+    game.mapId = nextMapId;
+    game.mapSeed = nextMapSeed;
+    placeLocalPlayerAtSpawn(layout);
+  }
   const assignments = randomRoundAssignments();
   const players = game.players.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive }));
-  const roundState = { type: 'round-state', round: game.round, abilities: game.monsterAbilities, assignments, players, monsterId: game.monsterId, mapSeed: game.mapSeed };
+  const roundState = { type: 'round-state', round: game.round, abilities: game.monsterAbilities, assignments, players, monsterId: game.monsterId, mapId: game.mapId, mapSeed: game.mapSeed };
   game.lastPublishedState = roundState;
   room.publishTopic('lobby-event', roundState);
   applyRoundState(roundState);
@@ -887,6 +936,15 @@ function applyRoundState(event) {
   controller.setEnabled(game.local.alive);
   ui.showGame();
   game.round = event.round;
+  const incomingMapId = validMapId(event.mapId || game.mapId);
+  selectedMapId = incomingMapId;
+  if (lobby) lobby.mapId = incomingMapId;
+  if (incomingMapId !== game.mapId) {
+    const layout = rebuildMap(event.mapSeed || Date.now(), incomingMapId);
+    game.mapId = incomingMapId;
+    game.mapSeed = event.mapSeed || game.mapSeed;
+    placeLocalPlayerAtSpawn(layout);
+  }
   game.monsterAbilities = event.abilities || game.monsterAbilities;
   game.selectedAbilityIndex = Math.min(game.selectedAbilityIndex || 0, Math.max(0, game.monsterAbilities.length - 1));
   puzzles.forEach((p) => setPuzzleActive(p, false));
@@ -1388,6 +1446,6 @@ function animate(time) {
   renderer.render(scene, camera);
 }
 
-rebuildMap(12345);
+rebuildMap(12345, DEFAULT_MAP_ID);
 refreshPublicLobbies();
 renderer.setAnimationLoop(animate);
