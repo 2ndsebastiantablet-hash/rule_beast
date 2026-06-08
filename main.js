@@ -976,13 +976,17 @@ function nearest(list, maxDistance) {
   return list.map((item) => ({ item, d: distance2D(playerModel.position, item.position) })).filter((x) => x.d <= maxDistance).sort((a, b) => a.d - b.d)[0]?.item || null;
 }
 
+function setDoorOpen(door, open) {
+  door.open = open;
+  door.mesh.rotation.y = (door.baseRotation || 0) + (door.open ? Math.PI / 2 : 0);
+  door.mesh.material.emissiveIntensity = door.open ? 0.65 : 0.22;
+}
+
 function handleInteractTap() {
   if (!game || game.ended || game.waitingBetweenRounds || !game.local.alive) return;
   const door = nearest(interactables.doors, 1.45);
   if (door) {
-    door.open = !door.open;
-    door.mesh.rotation.y = door.open ? Math.PI / 2 : 0;
-    door.mesh.material.emissiveIntensity = door.open ? 0.65 : 0.22;
+    setDoorOpen(door, !door.open);
     ui.flash(`${door.open ? 'Opened' : 'Closed'} ${door.room} door`);
   }
 }
@@ -1092,9 +1096,7 @@ function applyAbilityImmediateEffect(ability) {
   if (ability.id === 'door_slam' || ability.tags?.includes('door')) {
     interactables.doors.forEach((door) => {
       if (distance2D(playerModel.position, door.position) < (ability.id === 'door_phase' ? 2.2 : 6.5)) {
-        door.open = ability.id === 'door_phase' || ability.id === 'heavy_charge';
-        door.mesh.rotation.y = door.open ? Math.PI / 2 : 0;
-        door.mesh.material.emissiveIntensity = door.open ? 0.65 : 0.22;
+        setDoorOpen(door, ability.id === 'door_phase' || ability.id === 'heavy_charge');
       }
     });
   }

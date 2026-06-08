@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 
 const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
 const index = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const entities = readFileSync(new URL('../entities.js', import.meta.url), 'utf8');
+const { DEFAULT_MAP_ID, createDefaultBunkerLabLayout } = await import('../maps.js');
 
 const updateVrInput = main.match(/function updateVRInput\(delta\) \{([\s\S]*?)\n\}/);
 assert.ok(updateVrInput, 'main.js should define updateVRInput');
@@ -24,3 +26,30 @@ assert.ok(
   !index.includes('rosebud-exported-splash') && !index.includes('Rosebud.AI'),
   'index.html should not render the Rosebud startup splash'
 );
+
+const bunker = createDefaultBunkerLabLayout(12345);
+const requiredZones = [
+  'Northwest Top Corridor Strip',
+  'West Storage Block',
+  'Southwest Utility Room',
+  'Central Bunker Hall',
+  'Central Connector Rooms',
+  'Upper Control Corridor',
+  'Northeast Lab Wing',
+  'Large East Chamber',
+  'Southeast Utility Room',
+  'Lower Maintenance Corridor'
+];
+const roomNames = new Set(bunker.rooms.map((room) => room.name));
+assert.equal(DEFAULT_MAP_ID, 'default_bunker_lab');
+assert.equal(bunker.id, DEFAULT_MAP_ID);
+requiredZones.forEach((zone) => assert.ok(roomNames.has(zone), `default bunker map should include ${zone}`));
+assert.ok(bunker.walls.length >= 34, 'default bunker map should define enough wall colliders for the floorplan');
+assert.ok(bunker.doors.length >= 8, 'default bunker map should include several usable gates/doors');
+assert.ok(bunker.props.length >= 20, 'default bunker map should include readable bunker/lab props');
+assert.ok(bunker.lights.length >= 14, 'default bunker map should include dim industrial lights');
+assert.ok(bunker.puzzles.length >= 24, 'default bunker map should keep puzzle stations distributed across the map');
+assert.ok(bunker.survivorSpawn.x < -12 && bunker.survivorSpawn.z > 6, 'survivors should spawn in the southwest/left safe area');
+assert.ok(bunker.monsterSpawn.x > 12 && bunker.monsterSpawn.z < -6, 'monster should spawn away from survivors in the east/northeast');
+assert.ok(main.includes('generateMapLayout(seed)'), 'matches still rebuild the default map through generateMapLayout');
+assert.ok(entities.includes("from './maps.js'"), 'entities should use the dedicated default bunker map definition');

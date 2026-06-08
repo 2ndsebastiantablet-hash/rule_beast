@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PUZZLE_TYPES } from './data.js';
+import { createDefaultBunkerLabLayout } from './maps.js';
 
 const cyan = new THREE.Color(0x40f6ff);
 const red = new THREE.Color(0xff153e);
@@ -18,14 +19,6 @@ export function createMaterials() {
     dead: new THREE.MeshStandardMaterial({ color: 0x201820, emissive: 0x330000, emissiveIntensity: 0.2, roughness: 1 }),
     door: new THREE.MeshStandardMaterial({ color: 0x211b16, emissive: 0x241008, emissiveIntensity: 0.22, roughness: 0.7 }),
     hand: new THREE.MeshStandardMaterial({ color: 0x25394d, emissive: 0x073e4a, emissiveIntensity: 0.45, roughness: 0.48 })
-  };
-}
-
-function rng(seed) {
-  let s = seed || 1;
-  return () => {
-    s = Math.sin(s) * 10000;
-    return s - Math.floor(s);
   };
 }
 
@@ -48,74 +41,7 @@ function makeLabel(text, color = '#7df8ff') {
 }
 
 export function generateMapLayout(seed) {
-  const random = rng(seed);
-  const centers = [
-    { name: 'Survivor Spawn', x: -18, z: 14, w: 8, d: 7, color: 0x123244 },
-    { name: 'Monster Spawn', x: 18, z: -15, w: 8, d: 7, color: 0x3a0712 },
-    { name: 'Central Atrium', x: 0, z: 0, w: 11, d: 10, color: 0x111827 }
-  ];
-  const names = ['Electrical Lab', 'Storage Classrooms', 'Control Office', 'Cafeteria', 'Dark Basement', 'Research Ward', 'Server Room'];
-  const slots = [
-    [-17, -8], [-16, 4], [15, -4], [16, 10], [-2, -16], [3, 14], [2, -7], [-6, 9]
-  ].sort(() => random() - 0.5);
-  for (let i = 0; i < 6; i += 1) {
-    const [x, z] = slots[i];
-    centers.push({
-      name: names[i],
-      x: x + (random() - 0.5) * 2,
-      z: z + (random() - 0.5) * 2,
-      w: 7 + Math.floor(random() * 5),
-      d: 6 + Math.floor(random() * 5),
-      color: [0x16251c, 0x1e1a14, 0x101b2b, 0x211917, 0x08080c, 0x181622][i % 6]
-    });
-  }
-
-  const walls = [
-    { x: 0, z: -22, w: 52, d: 2 },
-    { x: 0, z: 22, w: 52, d: 2 },
-    { x: -26, z: 0, w: 2, d: 46 },
-    { x: 26, z: 0, w: 2, d: 46 }
-  ];
-  const doors = [];
-  const corridors = [];
-  centers.forEach((room, index) => {
-    if (index === 2) return;
-    corridors.push({ from: room, to: centers[2] });
-    doors.push({ id: `door_${index}`, x: (room.x + centers[2].x) / 2, z: (room.z + centers[2].z) / 2, room: room.name });
-  });
-
-  for (let i = 0; i < 8; i += 1) {
-    const horizontal = random() > 0.5;
-    walls.push({
-      x: Math.round((random() - 0.5) * 32),
-      z: Math.round((random() - 0.5) * 28),
-      w: horizontal ? 5 + random() * 8 : 1.5,
-      d: horizontal ? 1.5 : 5 + random() * 8
-    });
-  }
-
-  const puzzleRooms = centers.filter((room) => !room.name.includes('Spawn'));
-  const puzzles = [];
-  for (let i = 0; i < 24; i += 1) {
-    const room = puzzleRooms[i % puzzleRooms.length];
-    puzzles.push({
-      x: room.x + (random() - 0.5) * Math.max(2, room.w - 3),
-      z: room.z + (random() - 0.5) * Math.max(2, room.d - 3),
-      room: room.name,
-      typeIndex: i % PUZZLE_TYPES.length
-    });
-  }
-
-  return {
-    seed,
-    rooms: centers,
-    corridors,
-    walls,
-    doors,
-    puzzles,
-    survivorSpawn: { x: centers[0].x, z: centers[0].z },
-    monsterSpawn: { x: centers[1].x, z: centers[1].z }
-  };
+  return createDefaultBunkerLabLayout(seed);
 }
 
 export function clearWorld(world) {
@@ -127,9 +53,19 @@ export function createWorld(scene, materials, layout) {
   const colliders = [];
   const interactables = { doors: [], roomLabels: [] };
   const add = (object) => { scene.add(object); objects.push(object); return object; };
+  const propMaterials = {
+    crate: new THREE.MeshStandardMaterial({ color: 0x2b261d, roughness: 0.85, metalness: 0.05 }),
+    server: new THREE.MeshStandardMaterial({ color: 0x0b1117, emissive: 0x032d36, emissiveIntensity: 0.35, roughness: 0.55, metalness: 0.45 }),
+    labTable: new THREE.MeshStandardMaterial({ color: 0x28313a, roughness: 0.46, metalness: 0.35 }),
+    generator: new THREE.MeshStandardMaterial({ color: 0x312719, emissive: 0x2b0a00, emissiveIntensity: 0.25, roughness: 0.58, metalness: 0.3 }),
+    pipe: new THREE.MeshStandardMaterial({ color: 0x343b3f, roughness: 0.42, metalness: 0.55 }),
+    containment: new THREE.MeshStandardMaterial({ color: 0x18333a, emissive: 0x075963, emissiveIntensity: 0.55, roughness: 0.2, metalness: 0.15, transparent: true, opacity: 0.72 }),
+    warning: new THREE.MeshStandardMaterial({ color: 0xffc928, emissive: 0x5a2400, emissiveIntensity: 0.45, roughness: 0.36, metalness: 0.15 })
+  };
 
-  const floor = add(new THREE.Mesh(new THREE.BoxGeometry(54, 0.28, 48), materials.floor));
-  floor.position.y = -0.14;
+  const floorBounds = layout.bounds || { w: 54, d: 48 };
+  const floor = add(new THREE.Mesh(new THREE.BoxGeometry(floorBounds.w, 0.28, floorBounds.d), materials.floor));
+  floor.position.set(floorBounds.x || 0, -0.14, floorBounds.z || 0);
   floor.receiveShadow = true;
 
   layout.rooms.forEach((area) => {
@@ -143,13 +79,21 @@ export function createWorld(scene, materials, layout) {
     interactables.roomLabels.push({ area, label });
   });
 
-  layout.corridors.forEach(({ from, to }) => {
-    const midX = (from.x + to.x) / 2;
-    const midZ = (from.z + to.z) / 2;
-    const hallX = add(new THREE.Mesh(new THREE.BoxGeometry(Math.abs(from.x - to.x) + 4, 0.035, 3.2), materials.room.clone()));
-    hallX.position.set(midX, 0.012, from.z);
-    const hallZ = add(new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.035, Math.abs(from.z - to.z) + 4), materials.room.clone()));
-    hallZ.position.set(to.x, 0.014, midZ);
+  layout.corridors.forEach((path) => {
+    if (path.from && path.to) {
+      const { from, to } = path;
+      const midX = (from.x + to.x) / 2;
+      const midZ = (from.z + to.z) / 2;
+      const hallX = add(new THREE.Mesh(new THREE.BoxGeometry(Math.abs(from.x - to.x) + 4, 0.035, 3.2), materials.room.clone()));
+      hallX.position.set(midX, 0.012, from.z);
+      const hallZ = add(new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.035, Math.abs(from.z - to.z) + 4), materials.room.clone()));
+      hallZ.position.set(to.x, 0.014, midZ);
+      return;
+    }
+    const mat = materials.room.clone();
+    mat.color.setHex(path.color || 0x101820);
+    const hall = add(new THREE.Mesh(new THREE.BoxGeometry(path.w, 0.035, path.d), mat));
+    hall.position.set(path.x, 0.014, path.z);
   });
 
   add(new THREE.GridHelper(52, 26, 0x293142, 0x151b2a)).position.y = 0.025;
@@ -169,19 +113,36 @@ export function createWorld(scene, materials, layout) {
   layout.doors.forEach((door) => {
     const mesh = add(new THREE.Mesh(new THREE.BoxGeometry(1.05, 2.35, 0.18), materials.door.clone()));
     mesh.position.set(door.x, 1.15, door.z);
+    mesh.rotation.y = door.rotation || 0;
     mesh.castShadow = true;
-    interactables.doors.push({ ...door, mesh, open: false, position: new THREE.Vector3(door.x, 0, door.z) });
+    interactables.doors.push({ ...door, baseRotation: door.rotation || 0, mesh, open: false, position: new THREE.Vector3(door.x, 0, door.z) });
   });
 
-  for (let i = 0; i < 26; i += 1) {
-    const flicker = i % 4 === 0;
-    const lamp = add(new THREE.PointLight(flicker ? 0xff2448 : 0x54e8ff, flicker ? 0.55 : 0.85, 7.5, 2.2));
-    lamp.position.set(-22 + (i % 8) * 6.2, 2.65, -18 + Math.floor(i / 8) * 12);
-    lamp.userData.flicker = flicker;
+  (layout.props || []).forEach((item) => {
+    const mat = (propMaterials[item.type] || propMaterials.crate).clone();
+    const mesh = add(new THREE.Mesh(new THREE.BoxGeometry(item.w, item.height || 0.8, item.d), mat));
+    mesh.position.set(item.x, (item.height || 0.8) / 2, item.z);
+    mesh.rotation.y = item.rotation || 0;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+  });
+
+  const lights = layout.lights?.length ? layout.lights : Array.from({ length: 26 }, (_, i) => ({
+    x: -22 + (i % 8) * 6.2,
+    z: -18 + Math.floor(i / 8) * 12,
+    color: i % 4 === 0 ? 0xff2448 : 0x54e8ff,
+    intensity: i % 4 === 0 ? 0.55 : 0.85,
+    distance: 7.5,
+    flicker: i % 4 === 0
+  }));
+  lights.forEach((lightInfo) => {
+    const lamp = add(new THREE.PointLight(lightInfo.color, lightInfo.intensity, lightInfo.distance, 2.2));
+    lamp.position.set(lightInfo.x, 2.65, lightInfo.z);
+    lamp.userData.flicker = lightInfo.flicker;
     lamp.userData.baseIntensity = lamp.intensity;
     const bulb = add(new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: lamp.color })));
     bulb.position.copy(lamp.position);
-  }
+  });
   return { objects, colliders, interactables };
 }
 
