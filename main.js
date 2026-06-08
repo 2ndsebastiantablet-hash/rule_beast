@@ -35,14 +35,27 @@ container.appendChild(renderer.domElement);
 if (navigator.xr) document.body.appendChild(VRButton.createButton(renderer));
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x03050a);
-scene.fog = new THREE.FogExp2(0x03050a, 0.052);
-scene.add(new THREE.HemisphereLight(0x20314a, 0x050004, 0.72));
-const key = new THREE.DirectionalLight(0xa8eaff, 1.45);
+const BASE_FOG_DENSITY = 0.034;
+const DEFAULT_LIGHTING = {
+  fogColor: 0x060914,
+  fogDensity: BASE_FOG_DENSITY,
+  ambientIntensity: 0.34,
+  hemiIntensity: 0.5,
+  keyIntensity: 0.78
+};
+scene.background = new THREE.Color(DEFAULT_LIGHTING.fogColor);
+scene.fog = new THREE.FogExp2(DEFAULT_LIGHTING.fogColor, BASE_FOG_DENSITY);
+const ambient = new THREE.AmbientLight(0xcfe4ff, DEFAULT_LIGHTING.ambientIntensity);
+scene.add(ambient);
+const hemi = new THREE.HemisphereLight(0xbfdcff, 0x08020a, DEFAULT_LIGHTING.hemiIntensity);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xcbdcff, DEFAULT_LIGHTING.keyIntensity);
 key.position.set(-8, 12, 5);
 key.castShadow = true;
 key.shadow.mapSize.set(1024, 1024);
 scene.add(key);
+const editorBoost = new THREE.HemisphereLight(0xe8fbff, 0x19101e, 0);
+scene.add(editorBoost);
 
 const camera = new THREE.PerspectiveCamera(74, 1, 0.05, 90);
 scene.add(camera);
@@ -56,8 +69,8 @@ const db = init({ appId: INSTANT_DB_APP_ID });
 const myId = `player_${Math.random().toString(36).slice(2, 8)}`;
 let myName = ui.playerName();
 const INTERACT_KEY = 'KeyE';
-// Prototype-only local unlock. This is not production security and does not grant cloud or GitHub upload access.
-const EDITOR_ADMIN_CODE = 'rulebeast-editor';
+// Prototype-only local unlock. This is not real security and does not grant upload/cloud access.
+const EDITOR_ADMIN_CODE = 'edit';
 const keys = new Set();
 const remoteMarkers = new Map();
 const vrControllers = [];
@@ -87,10 +100,28 @@ scene.add(playerModel);
 let controller = new PlayerController(playerModel, { moveSpeed: TUNING.survivorSpeed, jumpSpeed: 0, groundLevel: 0, cameraMode: 'first-person', rotateToMovement: false, mobileControls: false });
 let fpCamera = new FirstPersonCameraController(camera, playerModel, renderer.domElement, { enabled: false, eyeHeight: 1.55, mouseSensitivity: 0.0022 });
 let assetEditor = null;
+let currentBaseFogDensity = BASE_FOG_DENSITY;
 
 function setControllerGroundLevel(y = 0) {
   controller.groundLevel = y;
   if (controller.velocity) controller.velocity.y = 0;
+}
+
+function applyMapLighting(layout = {}) {
+  const lighting = { ...DEFAULT_LIGHTING, ...(layout.lighting || {}) };
+  currentBaseFogDensity = lighting.fogDensity;
+  scene.background.setHex(lighting.fogColor);
+  if (scene.fog) {
+    scene.fog.color.setHex(lighting.fogColor);
+    scene.fog.density = lighting.fogDensity;
+  }
+  ambient.intensity = lighting.ambientIntensity;
+  hemi.intensity = lighting.hemiIntensity;
+  key.intensity = lighting.keyIntensity;
+}
+
+function setEditorBrightnessBoost(enabled) {
+  editorBoost.intensity = enabled ? 0.42 : 0;
 }
 
 function setupVRControllers() {
@@ -152,7 +183,8 @@ assetEditor = initAssetEditor({
   getCurrentMapId: () => selectedMapId,
   getCurrentMapName: () => MAP_OPTIONS.find((map) => map.id === selectedMapId)?.name || selectedMapId,
   getCurrentMapLayout: () => currentLayout,
-  getPlayerPosition: () => playerModel.position.clone()
+  getPlayerPosition: () => playerModel.position.clone(),
+  onEditorModeChange: setEditorBrightnessBoost
 });
 
 function isInteractKey(event) {
@@ -753,6 +785,7 @@ function rebuildMap(seed, mapId = selectedMapId) {
   const layout = generateMapLayout(seed, mapId);
   selectedMapId = layout.id || validMapId(mapId);
   currentLayout = layout;
+  applyMapLighting(layout);
   world = createWorld(scene, materials, layout);
   colliders = world.colliders;
   interactables = world.interactables;
@@ -1269,7 +1302,7 @@ function applyAbilityImmediateEffect(ability) {
     });
   }
   if (ability.tags?.includes('fog')) {
-    effect.fogDensity = scene.fog?.density || 0.052;
+    effect.fogDensity = scene.fog?.density || currentBaseFogDensity;
     scene.fog.density = Math.min(0.11, scene.fog.density + 0.028);
     game.survivorDebuffs.fog = Math.max(game.survivorDebuffs.fog || 0, effect.duration);
   }
@@ -1446,7 +1479,7 @@ function updateEffects(delta) {
   interactables.roomLabels.forEach(({ area, label }) => {
     label.visible = Math.abs((playerModel.position.y || 0) - (area.y || 0)) < 1.1 && Math.abs(playerModel.position.x - area.x) < area.w / 2 && Math.abs(playerModel.position.z - area.z) < area.d / 2;
   });
-  if (game?.survivorDebuffs?.fog <= 0 && scene.fog) scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, 0.052, delta * 0.8);
+  if (game?.survivorDebuffs?.fog <= 0 && scene.fog) scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, currentBaseFogDensity, delta * 0.8);
   if (game) game.roundBannerTime = Math.max(0, game.roundBannerTime - delta);
 }
 

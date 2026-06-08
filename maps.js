@@ -149,6 +149,14 @@ export function createDefaultBunkerLabLayout(seed = 0) {
     doors,
     props: [],
     lights,
+    lighting: {
+      fogColor: 0x070a13,
+      fogDensity: 0.034,
+      ambientIntensity: 0.36,
+      hemiIntensity: 0.52,
+      keyIntensity: 0.82,
+      pointIntensityMultiplier: 1.28
+    },
     puzzles,
     puzzleSlots: puzzles,
     survivorSpawn: { x: -18.8, z: 12.3 },
@@ -229,6 +237,14 @@ export function createAmusementParkLayout(seed = 0) {
     doors: [],
     props: [],
     lights,
+    lighting: {
+      fogColor: 0x09120f,
+      fogDensity: 0.028,
+      ambientIntensity: 0.44,
+      hemiIntensity: 0.62,
+      keyIntensity: 1.02,
+      pointIntensityMultiplier: 1.15
+    },
     puzzles,
     puzzleSlots: puzzles,
     survivorSpawn: { x: -21, z: 1 },
@@ -390,6 +406,14 @@ export function createHotelLayout(seed = 0) {
     doors,
     props: [],
     lights,
+    lighting: {
+      fogColor: 0x080711,
+      fogDensity: 0.032,
+      ambientIntensity: 0.4,
+      hemiIntensity: 0.56,
+      keyIntensity: 0.74,
+      pointIntensityMultiplier: 1.34
+    },
     puzzles,
     puzzleSlots: puzzles,
     stairConnections,

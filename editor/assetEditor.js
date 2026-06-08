@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { EditorUI } from './editorUI.js';
 import { EditorState } from './editorState.js';
-import { buildAssetManifest, downloadManifest, parseManifestJson, stringifyManifest } from './editorManifest.js';
+import { buildEditorExport, downloadEditorJson, stringifyEditorExport } from './editorExport.js';
 import {
   getEditableObject,
   getEditableObjects,
@@ -19,13 +19,62 @@ import {
 const TEXTURE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
 const TEXTURE_MIMES = ['image/png', 'image/jpeg', 'image/webp'];
 const GLB_MIMES = ['model/gltf-binary', 'application/octet-stream', ''];
+const MIN_SCALE = 0.05;
 
 const nextId = (prefix, list) => `${prefix}_${String(list.length + 1).padStart(3, '0')}_${Date.now().toString(36)}`;
 const repoPath = (folder, name) => `assets/${folder}/${name.replace(/[^a-z0-9._-]/gi, '_')}`;
-const vectorToPlain = (v) => ({ x: Number(v.x.toFixed(3)), y: Number(v.y.toFixed(3)), z: Number(v.z.toFixed(3)) });
+const clampBrightness = (brightness = 1) => THREE.MathUtils.clamp(Number(brightness) || 1, 0.25, 2.5);
+const toPlainVector = (v) => ({ x: Number(v.x.toFixed(3)), y: Number(v.y.toFixed(3)), z: Number(v.z.toFixed(3)) });
 
 export function initAssetEditor(options) {
   return new AssetEditor(options);
+}
+
+export function applyBrightnessToMaterial(material, brightness = 1) {
+  if (!material) return;
+  const b = clampBrightness(brightness);
+  material.userData ||= {};
+  if (material.color && !material.userData.editorOriginalColor) material.userData.editorOriginalColor = material.color.clone();
+  if (material.emissive && !material.userData.editorOriginalEmissive) material.userData.editorOriginalEmissive = material.emissive.clone();
+  if (material.emissive && material.userData.editorOriginalEmissiveIntensity === undefined) material.userData.editorOriginalEmissiveIntensity = material.emissiveIntensity || 0;
+  if (material.color && material.userData.editorOriginalColor) material.color.copy(material.userData.editorOriginalColor).multiplyScalar(b);
+  if (material.emissive && material.userData.editorOriginalEmissive) {
+    material.emissive.copy(material.userData.editorOriginalEmissive).multiplyScalar(Math.max(1, b * 0.55));
+    material.emissiveIntensity = material.userData.editorOriginalEmissiveIntensity + (b > 1 ? 0.08 * (b - 1) : 0);
+  }
+  material.needsUpdate = true;
+}
+
+function materialArray(material) {
+  if (!material) return [];
+  return Array.isArray(material) ? material : [material];
+}
+
+function cloneMaterialValue(material) {
+  return Array.isArray(material) ? material.map((item) => item.clone()) : material?.clone?.();
+}
+
+function assignMaterial(target, materials) {
+  if (Array.isArray(target.material)) target.material = materials;
+  else target.material = materials[0] || target.material;
+}
+
+function ensureEditableMaterials(target) {
+  if (!target?.material) return [];
+  target.userData ||= {};
+  if (!target.userData.editorOriginalMaterials) target.userData.editorOriginalMaterials = cloneMaterialValue(target.material);
+  if (!target.userData.editorMaterialCloned) {
+    target.material = cloneMaterialValue(target.material);
+    target.userData.editorMaterialCloned = true;
+  }
+  return materialArray(target.material);
+}
+
+function resetEditableMaterials(target) {
+  if (!target?.userData?.editorOriginalMaterials) return false;
+  target.material = cloneMaterialValue(target.userData.editorOriginalMaterials);
+  target.userData.editorMaterialCloned = false;
+  return true;
 }
 
 class AssetEditor {
@@ -35,40 +84,43 @@ class AssetEditor {
     this.loader = new GLTFLoader();
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
-    this.messages = [];
     this.enabled = false;
-    this.highlightEnabled = true;
+    this.toolMode = 'select';
+    this.selectedTextureId = '';
+    this.selectedModelId = '';
+    this.messages = [];
     initializeEditableRegistry(options.scene);
     setSelectionChangedHandler((meta) => this.onSelectionChanged(meta));
     this.ui = new EditorUI({
       unlock: (code) => this.unlock(code),
       close: () => this.close(),
-      refreshObjects: () => this.refreshObjects(),
-      selectObject: (id) => this.selectObject(id),
-      toggleHighlight: (enabled) => this.toggleHighlight(enabled),
+      setToolMode: (mode) => this.setToolMode(mode),
       importTexture: (file) => this.importTexture(file),
-      getTexture: (id) => this.state.textures.find((item) => item.id === id),
-      applyTexture: () => this.applySelectedTexture(),
-      removeTexture: () => this.removeTextureFromSelected(),
-      updateTextureSettings: () => this.updateTextureSettings(),
-      resetTextureSettings: () => this.resetTextureSettings(),
+      selectTexture: (id) => this.selectTexture(id),
+      removeTexture: (id) => this.removeTexture(id),
       importModel: (file) => this.importModel(file),
-      placeModel: () => this.placeSelectedModel(),
+      selectModel: (id) => this.selectModel(id),
+      removeModel: (id) => this.removeModel(id),
+      selectPlacedModel: (id) => this.selectPlacedModel(id),
+      applySelectedTexture: () => this.applySelectedTextureToSelectedSurface(),
+      resetSurface: () => this.resetSelectedSurface(),
+      changeBrightness: (brightness) => this.changeSelectedBrightness(brightness),
+      updateSurfaceRepeat: (repeat) => this.updateSelectedSurfaceRepeat(repeat),
+      modelAction: (action, steps) => this.modelAction(action, steps),
+      setModelRotation: (degrees) => this.setSelectedModelRotation(degrees),
+      setModelScale: (axis, value) => this.setSelectedModelScale(axis, value),
       duplicateModel: () => this.duplicateSelectedModel(),
       deleteModel: () => this.deleteSelectedModel(),
-      applyTransform: () => this.applyTransform(),
-      resetTransform: () => this.resetTransform(),
-      moveToPlayer: () => this.moveSelectedToPlayer(),
       saveDraft: () => this.saveDraft(),
       loadDraft: () => this.loadDraft(),
       clearDraft: () => this.clearDraft(),
-      exportManifest: () => this.exportManifest(),
-      copyManifest: () => this.copyManifest(),
-      applyManifest: () => this.applyImportedManifest()
+      exportJson: () => this.exportJson()
     });
     options.renderer.domElement.addEventListener('pointerdown', (event) => this.handleCanvasPointerDown(event), true);
+    options.renderer.domElement.addEventListener('dragover', (event) => this.handleCanvasDragOver(event), true);
+    options.renderer.domElement.addEventListener('drop', (event) => this.handleCanvasDrop(event), true);
     this.refreshObjects();
-    this.log('Editor ready. Unlock with the prototype admin code.');
+    this.log('Editor ready. Unlock with code: edit.');
   }
 
   currentMapId() {
@@ -81,63 +133,81 @@ class AssetEditor {
 
   unlock(code) {
     if (code !== this.options.adminCode) {
-      this.log('Wrong admin code. Editor remains locked.');
+      this.log('Wrong editor code.');
       return;
     }
     this.enabled = true;
     this.ui.setUnlocked(true);
+    this.setToolMode('select');
+    this.options.onEditorModeChange?.(true);
     this.refreshObjects();
-    this.log('Editor Mode enabled. Local-only assets are not synced or uploaded.');
+    this.log('Editor mode enabled. Local testing only.');
   }
 
   close() {
     this.enabled = false;
     clearEditableSelection();
     this.ui.setUnlocked(false);
-    this.log('Editor Mode closed. Gameplay controls are normal.');
+    this.options.onEditorModeChange?.(false);
+    this.log('Editor closed. Normal gameplay controls restored.');
+  }
+
+  setToolMode(mode) {
+    this.toolMode = ['select', 'paint', 'place', 'edit'].includes(mode) ? mode : 'select';
+    this.ui.setToolMode(this.toolMode);
   }
 
   refreshObjects() {
     const selected = getSelectedEditableObject();
     this.ui.setMapSummary(`Map: ${this.currentMapName()} (${this.currentMapId()})`);
-    this.ui.setObjectOptions(getEditableObjects(), selected?.id);
+    this.ui.setTextures(this.state.textures, this.selectedTextureId);
+    this.ui.setModels(this.state.models, this.selectedModelId);
+    this.ui.setPlacedModels(this.state.placedModels, selected?.id);
     this.updateStats();
   }
 
-  selectObject(id) {
-    const meta = selectEditableObject(id);
-    if (!meta) this.log('No editable object selected.');
+  selectTexture(id) {
+    this.selectedTextureId = id;
+    this.setToolMode('paint');
+    this.refreshObjects();
+    this.log('Texture selected. Click a surface or drag the texture onto the map.');
   }
 
-  toggleHighlight(enabled) {
-    this.highlightEnabled = enabled;
-    if (!enabled) selectEditableObject('');
-    else {
-      const id = this.ui.selectedObjectId();
-      if (id) selectEditableObject(id);
-    }
+  removeTexture(id) {
+    const texture = this.state.textures.find((item) => item.id === id);
+    if (texture?.temporaryLocalUrl) URL.revokeObjectURL(texture.temporaryLocalUrl);
+    this.state.removeTexture(id);
+    if (this.selectedTextureId === id) this.selectedTextureId = '';
+    this.refreshObjects();
+    this.log('Texture removed from My Textures.');
   }
 
-  onSelectionChanged(meta) {
-    if (!this.highlightEnabled && meta) return;
-    this.ui.setSelectedInfo(meta);
-    const edit = meta ? this.state.surfaceEdits.find((item) => item.targetId === meta.id) : null;
-    this.ui.setTextureSettings(edit || null);
-    if (meta?.supportsTransform) {
-      this.ui.setTransformValues({
-        position: meta.object3D.position,
-        rotation: meta.object3D.rotation,
-        scale: meta.object3D.scale
-      });
-    }
+  selectModel(id) {
+    this.selectedModelId = id;
+    this.setToolMode('place');
+    this.refreshObjects();
+    this.log('Model selected. Click the map or drag the model into the canvas.');
+  }
+
+  removeModel(id) {
+    const model = this.state.models.find((item) => item.id === id);
+    if (model?.temporaryLocalUrl) URL.revokeObjectURL(model.temporaryLocalUrl);
+    this.state.removeModel(id);
+    if (this.selectedModelId === id) this.selectedModelId = '';
+    this.refreshObjects();
+    this.log('Model removed from My Models. Already placed copies stay in the map.');
+  }
+
+  selectPlacedModel(id) {
+    if (selectEditableObject(id)) this.setToolMode('edit');
+    else this.log('Placed object is missing from the scene. Re-upload local files to restore it.');
+    this.refreshObjects();
   }
 
   validateTexture(file) {
     if (!file) throw new Error('Choose a texture file first.');
     const lower = file.name.toLowerCase();
-    if (!TEXTURE_EXTENSIONS.some((ext) => lower.endsWith(ext)) || !TEXTURE_MIMES.includes(file.type)) {
-      throw new Error('Unsupported texture format. Use png, jpg, jpeg, or webp.');
-    }
+    if (!TEXTURE_EXTENSIONS.some((ext) => lower.endsWith(ext)) || !TEXTURE_MIMES.includes(file.type)) throw new Error('Use png, jpg, jpeg, or webp textures.');
   }
 
   async importTexture(file) {
@@ -145,19 +215,20 @@ class AssetEditor {
       this.validateTexture(file);
       const url = URL.createObjectURL(file);
       const warnings = [];
-      if (file.size > 5 * 1024 * 1024) warnings.push('Texture is larger than 5 MB and may lag in browser/VR.');
+      if (file.size > 5 * 1024 * 1024) warnings.push('Texture is over 5 MB.');
       const texture = await this.loadTexture(url);
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.RepeatWrapping;
       texture.colorSpace = THREE.SRGBColorSpace;
       const image = await this.loadImage(url).catch(() => null);
-      if (image && (image.naturalWidth > 2048 || image.naturalHeight > 2048)) warnings.push('Texture resolution is above 2048x2048.');
+      if (image && (image.naturalWidth > 2048 || image.naturalHeight > 2048)) warnings.push('Texture resolution is over 2048x2048.');
       const meta = this.state.addTexture({
         id: nextId('texture', this.state.textures),
         name: file.name,
-        type: 'texture',
         fileType: file.type,
         fileSizeBytes: file.size,
+        width: image?.naturalWidth || null,
+        height: image?.naturalHeight || null,
         temporaryLocalUrl: url,
         intendedRepoPath: repoPath('textures', file.name),
         createdAt: Date.now(),
@@ -166,8 +237,8 @@ class AssetEditor {
         imageElement: image
       });
       warnings.forEach((warning) => this.state.warn(`${file.name}: ${warning}`));
-      this.ui.setTextureOptions(this.state.textures);
-      this.log(`Texture imported: ${meta.name}`);
+      this.selectTexture(meta.id);
+      this.log(`Texture uploaded: ${file.name}`);
     } catch (error) {
       this.state.warn(error.message);
       this.log(error.message);
@@ -189,94 +260,9 @@ class AssetEditor {
     });
   }
 
-  textureSettingsOrDefault() {
-    const settings = this.ui.textureSettings();
-    if (settings.repeat.x <= 0 || settings.repeat.y <= 0) throw new Error('Texture repeat values must be positive.');
-    return settings;
-  }
-
-  applySelectedTexture() {
-    try {
-      const meta = getSelectedEditableObject();
-      const texture = this.state.textures.find((item) => item.id === this.ui.selectedTextureId());
-      if (!meta) throw new Error('Select an editable object first.');
-      if (!meta.supportsTexture) throw new Error('Selected object does not support texture editing.');
-      if (!texture?.textureObject) throw new Error('Select an imported texture from this browser session.');
-      this.applyTextureToObject(meta, texture, this.textureSettingsOrDefault());
-      this.log(`Applied ${texture.name} to ${meta.id}`);
-    } catch (error) {
-      this.state.warn(error.message);
-      this.log(error.message);
-    }
-  }
-
-  applyTextureToObject(meta, textureMeta, settings) {
-    const target = meta.materialTarget || meta.object3D;
-    const materials = Array.isArray(target.material) ? target.material : [target.material];
-    const clonedMaterials = materials.map((material) => {
-      const clone = material.clone();
-      const texture = textureMeta.textureObject.clone();
-      texture.wrapS = THREE.RepeatWrapping;
-      texture.wrapT = THREE.RepeatWrapping;
-      texture.repeat.set(settings.repeat.x, settings.repeat.y);
-      texture.offset.set(settings.offset.x, settings.offset.y);
-      texture.rotation = settings.rotation;
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.needsUpdate = true;
-      clone.map = texture;
-      clone.needsUpdate = true;
-      return clone;
-    });
-    target.material = Array.isArray(target.material) ? clonedMaterials : clonedMaterials[0];
-    this.state.upsertSurfaceEdit({
-      targetId: meta.id,
-      textureId: textureMeta.id,
-      textureName: textureMeta.name,
-      repeat: settings.repeat,
-      offset: settings.offset,
-      rotation: settings.rotation,
-      appliedAt: Date.now()
-    });
-    this.updateStats();
-  }
-
-  removeTextureFromSelected() {
-    const meta = getSelectedEditableObject();
-    if (!meta?.supportsTexture) return this.log('Select a textured surface first.');
-    const target = meta.materialTarget || meta.object3D;
-    const materials = Array.isArray(target.material) ? target.material : [target.material];
-    const cleaned = materials.map((material) => {
-      const clone = material.clone();
-      clone.map = null;
-      clone.needsUpdate = true;
-      return clone;
-    });
-    target.material = Array.isArray(target.material) ? cleaned : cleaned[0];
-    this.state.removeSurfaceEdit(meta.id);
-    this.updateStats();
-    this.log(`Removed texture from ${meta.id}`);
-  }
-
-  updateTextureSettings() {
-    const meta = getSelectedEditableObject();
-    const edit = meta ? this.state.surfaceEdits.find((item) => item.targetId === meta.id) : null;
-    const texture = edit ? this.state.textures.find((item) => item.id === edit.textureId) : null;
-    if (!meta || !edit || !texture?.textureObject) return this.log('Apply a texture before updating settings.');
-    try {
-      this.applyTextureToObject(meta, texture, this.textureSettingsOrDefault());
-    } catch (error) {
-      this.log(error.message);
-    }
-  }
-
-  resetTextureSettings() {
-    this.ui.setTextureSettings(null);
-    this.updateTextureSettings();
-  }
-
   validateGlb(file) {
     if (!file) throw new Error('Choose a GLB file first.');
-    if (!file.name.toLowerCase().endsWith('.glb') || !GLB_MIMES.includes(file.type)) throw new Error('Unsupported model format. Use .glb only.');
+    if (!file.name.toLowerCase().endsWith('.glb') || !GLB_MIMES.includes(file.type)) throw new Error('Use .glb model files only.');
   }
 
   async importModel(file) {
@@ -297,8 +283,8 @@ class AssetEditor {
         loadedScene: gltf.scene,
         gltf
       });
-      this.ui.setModelOptions(this.state.models);
-      this.log(`GLB imported: ${meta.name}. Models are visual-only for now.`);
+      this.selectModel(meta.id);
+      this.log(`GLB uploaded: ${file.name}`);
     } catch (error) {
       this.state.warn(error.message);
       this.log(error.message);
@@ -306,80 +292,208 @@ class AssetEditor {
   }
 
   loadGlb(url) {
-    return new Promise((resolve, reject) => {
-      this.loader.load(url, resolve, undefined, reject);
-    });
+    return new Promise((resolve, reject) => this.loader.load(url, resolve, undefined, reject));
   }
 
   analyzeModel(file, gltf) {
     const warnings = [];
-    if (file.size > 25 * 1024 * 1024) warnings.push('Strong warning: GLB is larger than 25 MB.');
-    else if (file.size > 10 * 1024 * 1024) warnings.push('GLB is larger than 10 MB and may reduce performance.');
+    if (file.size > 25 * 1024 * 1024) warnings.push('Strong warning: model is over 25 MB.');
+    else if (file.size > 10 * 1024 * 1024) warnings.push('Model is over 10 MB.');
     let meshes = 0;
     const materials = new Set();
-    const textures = new Set();
     gltf.scene.traverse((child) => {
       if (!child.isMesh) return;
       meshes += 1;
-      const mats = Array.isArray(child.material) ? child.material : [child.material];
-      mats.filter(Boolean).forEach((material) => {
-        materials.add(material);
-        ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap'].forEach((key) => {
-          if (material[key]) textures.add(material[key]);
-        });
-      });
+      materialArray(child.material).filter(Boolean).forEach((material) => materials.add(material));
     });
-    const size = new THREE.Box3().setFromObject(gltf.scene).getSize(new THREE.Vector3());
-    if (meshes > 100) warnings.push('Model has more than 100 meshes.');
-    if (materials.size > 20) warnings.push('Model has more than 20 materials.');
-    if (textures.size > 20) warnings.push('Model appears to use many textures.');
-    if (Math.max(size.x, size.y, size.z) > 25) warnings.push('Model bounding box is extremely large.');
-    if (Math.max(size.x, size.y, size.z) > 0 && Math.max(size.x, size.y, size.z) < 0.05) warnings.push('Model bounding box is extremely tiny.');
-    if (gltf.animations?.length) warnings.push('Model contains animations; this editor treats models as static.');
+    if (meshes > 100) warnings.push('Model has many meshes.');
+    if (materials.size > 20) warnings.push('Model has many materials.');
+    if (gltf.animations?.length) warnings.push('Animations are ignored in this simple editor.');
     return warnings;
+  }
+
+  raycastEditorTarget(event) {
+    const rect = this.options.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.options.camera);
+    const objects = getEditableObjects().map((meta) => meta.object3D);
+    const hit = this.raycaster.intersectObjects(objects, true)[0];
+    if (!hit) return { point: null, meta: null };
+    let object = hit.object;
+    while (object && !object.userData.editableId) object = object.parent;
+    return { point: hit.point, meta: object?.userData.editableId ? getEditableObject(object.userData.editableId) : null };
+  }
+
+  handleCanvasPointerDown(event) {
+    if (!this.enabled) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const target = this.raycastEditorTarget(event);
+    if (this.toolMode === 'paint') {
+      if (!target.meta) return this.log('Click an editable surface to paint it.');
+      return this.paintTextureOnSurface(target.meta);
+    }
+    if (this.toolMode === 'place') return this.placeModelAtPoint(target.point);
+    if (target.meta) {
+      selectEditableObject(target.meta.id);
+      if (target.meta.supportsTransform) this.setToolMode('edit');
+      this.refreshObjects();
+    }
+  }
+
+  handleCanvasDragOver(event) {
+    if (!this.enabled) return;
+    event.preventDefault();
+  }
+
+  handleCanvasDrop(event) {
+    if (!this.enabled) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const raw = event.dataTransfer?.getData('application/x-rule-beast-editor');
+    if (!raw) return;
+    const payload = JSON.parse(raw);
+    const target = this.raycastEditorTarget(event);
+    if (payload.kind === 'texture') {
+      this.selectedTextureId = payload.id;
+      return target.meta ? this.paintTextureOnSurface(target.meta) : this.log('Drop textures onto an editable surface.');
+    }
+    if (payload.kind === 'model') {
+      this.selectedModelId = payload.id;
+      return this.placeModelAtPoint(target.point);
+    }
+  }
+
+  paintTextureOnSurface(meta) {
+    if (!meta?.supportsTexture) return this.log('That object cannot accept a texture.');
+    const texture = this.state.textures.find((item) => item.id === this.selectedTextureId);
+    if (!texture?.textureObject) return this.log('Select an uploaded texture first.');
+    const repeat = this.state.surfaceEdit(meta.id)?.repeat || { x: 1, y: 1 };
+    this.applyTextureToSurface(meta, texture, repeat);
+    selectEditableObject(meta.id);
+    this.refreshObjects();
+    this.log(`Painted ${texture.name} on ${meta.id}`);
+  }
+
+  applySelectedTextureToSelectedSurface() {
+    const meta = getSelectedEditableObject();
+    if (!meta) return this.log('Select a surface first.');
+    this.paintTextureOnSurface(meta);
+  }
+
+  applyTextureToSurface(meta, textureMeta, repeat = { x: 1, y: 1 }) {
+    const target = meta.materialTarget || meta.object3D;
+    const materials = ensureEditableMaterials(target);
+    const brightness = this.state.surfaceEdit(meta.id)?.brightness || 1;
+    materials.forEach((material) => {
+      const texture = textureMeta.textureObject.clone();
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(repeat.x, repeat.y);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      material.map = texture;
+      if (material.color) {
+        material.color.set(0xffffff);
+        material.userData.editorOriginalColor = new THREE.Color(0xffffff);
+      }
+      applyBrightnessToMaterial(material, brightness);
+    });
+    this.state.upsertSurfaceEdit({
+      targetId: meta.id,
+      targetType: meta.type,
+      mapId: this.currentMapId(),
+      textureId: textureMeta.id,
+      textureName: textureMeta.name,
+      brightness,
+      surfaceBrightness: brightness,
+      repeat,
+      updatedAt: Date.now()
+    });
+  }
+
+  updateSelectedSurfaceRepeat(repeat) {
+    const meta = getSelectedEditableObject();
+    if (!meta || meta.supportsTransform) return;
+    const edit = this.state.surfaceEdit(meta.id);
+    const texture = edit ? this.state.textures.find((item) => item.id === edit.textureId) : null;
+    if (!texture?.textureObject) return;
+    this.applyTextureToSurface(meta, texture, repeat);
+    this.refreshObjects();
+  }
+
+  applySurfaceBrightness(meta, brightness) {
+    if (!meta?.supportsTexture) return;
+    const target = meta.materialTarget || meta.object3D;
+    const materials = ensureEditableMaterials(target);
+    materials.forEach((material) => applyBrightnessToMaterial(material, brightness));
+    const existing = this.state.surfaceEdit(meta.id) || {};
+    this.state.upsertSurfaceEdit({
+      ...existing,
+      targetId: meta.id,
+      targetType: meta.type,
+      mapId: this.currentMapId(),
+      brightness: clampBrightness(brightness),
+      surfaceBrightness: clampBrightness(brightness),
+      repeat: existing.repeat || { x: 1, y: 1 },
+      updatedAt: Date.now()
+    });
+  }
+
+  resetSelectedSurface() {
+    const meta = getSelectedEditableObject();
+    if (!meta || meta.supportsTransform) return this.log('Select a surface first.');
+    const target = meta.materialTarget || meta.object3D;
+    resetEditableMaterials(target);
+    this.state.removeSurfaceEdit(meta.id);
+    this.refreshObjects();
+    this.log(`Reset surface: ${meta.id}`);
   }
 
   cloneModelScene(scene) {
     const clone = scene.clone(true);
     clone.traverse((child) => {
-      if (child.isMesh && child.material) {
-        child.material = Array.isArray(child.material) ? child.material.map((mat) => mat.clone()) : child.material.clone();
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
+      if (!child.isMesh || !child.material) return;
+      child.material = cloneMaterialValue(child.material);
+      materialArray(child.material).forEach((material) => applyBrightnessToMaterial(material, 1));
+      child.castShadow = true;
+      child.receiveShadow = true;
     });
     return clone;
   }
 
-  placeSelectedModel(transformOverride = null) {
-    const asset = this.state.models.find((item) => item.id === this.ui.selectedModelId());
-    if (!asset?.loadedScene) return this.log('Select an imported GLB from this browser session.');
+  placeModelAtPoint(point = null) {
+    const asset = this.state.models.find((item) => item.id === this.selectedModelId);
+    if (!asset?.loadedScene) return this.log('Select an uploaded GLB model first.');
     const object = this.cloneModelScene(asset.loadedScene);
     const player = this.options.getPlayerPosition?.() || new THREE.Vector3(0, 0, 0);
-    const transform = transformOverride || {
-      position: { x: player.x + 1.5, y: player.y || 0, z: player.z - 1.5 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 }
-    };
-    this.applyTransformToObject(object, transform);
+    const position = point
+      ? { x: point.x, y: Math.max(-8, point.y), z: point.z }
+      : { x: player.x + 1.5, y: player.y || 0, z: player.z - 1.5 };
+    object.position.set(position.x, position.y, position.z);
+    object.rotation.set(0, 0, 0);
+    object.scale.set(1, 1, 1);
     this.options.scene.add(object);
     const placement = this.state.addPlacedModel({
       id: nextId('placedModel', this.state.placedModels),
       modelAssetId: asset.id,
       modelName: asset.name,
       mapId: this.currentMapId(),
-      floor: this.floorFromY(transform.position.y),
+      floor: this.floorFromY(position.y),
       zone: 'editor_local',
-      position: transform.position,
-      rotation: transform.rotation,
-      scale: transform.scale,
+      position,
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1, uniform: 1 },
+      brightness: 1,
+      modelBrightness: 1,
       visualOnly: true,
       object3D: object
     });
     registerEditableObject({
       id: placement.id,
       type: 'model',
-      category: 'imported-model',
+      category: 'placed-model',
       mapId: placement.mapId,
       floor: placement.floor,
       zone: placement.zone,
@@ -389,6 +503,7 @@ class AssetEditor {
       source: 'editor-import'
     });
     selectEditableObject(placement.id);
+    this.setToolMode('edit');
     this.refreshObjects();
     this.log(`Placed visual-only model: ${asset.name}`);
     return placement;
@@ -400,53 +515,127 @@ class AssetEditor {
     return floors.reduce((best, floor) => Math.abs((floor.y || 0) - y) < Math.abs((best.y || 0) - y) ? floor : best, floors[0]).id;
   }
 
-  applyTransformToObject(object, transform) {
-    object.position.set(transform.position.x, transform.position.y, transform.position.z);
-    object.rotation.set(transform.rotation.x, transform.rotation.y, transform.rotation.z);
-    object.scale.set(transform.scale.x, transform.scale.y, transform.scale.z);
-    object.updateMatrixWorld(true);
-  }
-
   selectedPlacement() {
     const meta = getSelectedEditableObject();
     if (!meta?.supportsTransform) return null;
-    return this.state.placedModels.find((item) => item.id === meta.id) || null;
+    return this.state.modelPlacement(meta.id);
   }
 
-  applyTransform() {
+  updatePlacementFromObject(placement, object) {
+    const patch = {
+      position: toPlainVector(object.position),
+      rotation: toPlainVector(object.rotation),
+      scale: {
+        x: Number(object.scale.x.toFixed(3)),
+        y: Number(object.scale.y.toFixed(3)),
+        z: Number(object.scale.z.toFixed(3)),
+        uniform: Number(((object.scale.x + object.scale.y + object.scale.z) / 3).toFixed(3))
+      },
+      floor: this.floorFromY(object.position.y)
+    };
+    this.state.updatePlacedModel(placement.id, patch);
+    refreshSelectionHighlight();
+    this.refreshObjects();
+  }
+
+  mutateSelectedModel(mutator) {
     const placement = this.selectedPlacement();
     const meta = getSelectedEditableObject();
-    if (!placement || !meta) return this.log('Select a placed imported model first.');
-    const transform = this.ui.transformValues();
-    this.applyTransformToObject(meta.object3D, transform);
-    this.state.updatePlacedModel(placement.id, { ...transform, floor: this.floorFromY(transform.position.y) });
+    if (!placement || !meta?.object3D) {
+      this.log('Select a placed model first.');
+      return null;
+    }
+    mutator(meta.object3D, placement);
+    meta.object3D.scale.set(
+      Math.max(MIN_SCALE, meta.object3D.scale.x),
+      Math.max(MIN_SCALE, meta.object3D.scale.y),
+      Math.max(MIN_SCALE, meta.object3D.scale.z)
+    );
+    meta.object3D.updateMatrixWorld(true);
+    this.updatePlacementFromObject(placement, meta.object3D);
+    return placement;
+  }
+
+  modelAction(action, steps) {
+    this.mutateSelectedModel((object) => {
+      if (action === 'move-left') object.position.x -= steps.move;
+      if (action === 'move-right') object.position.x += steps.move;
+      if (action === 'move-forward') object.position.z -= steps.move;
+      if (action === 'move-back') object.position.z += steps.move;
+      if (action === 'move-up') object.position.y += steps.move;
+      if (action === 'move-down') object.position.y -= steps.move;
+      if (action === 'rotate-left') object.rotation.y -= steps.rotate;
+      if (action === 'rotate-right') object.rotation.y += steps.rotate;
+      if (action === 'reset-rotation') object.rotation.set(0, 0, 0);
+      if (action === 'bigger') object.scale.multiplyScalar(1 + steps.scale);
+      if (action === 'smaller') object.scale.multiplyScalar(Math.max(0.1, 1 - steps.scale));
+      if (action === 'taller') object.scale.y += steps.scale;
+      if (action === 'shorter') object.scale.y -= steps.scale;
+      if (action === 'wider') object.scale.x += steps.scale;
+      if (action === 'narrower') object.scale.x -= steps.scale;
+      if (action === 'deeper') object.scale.z += steps.scale;
+      if (action === 'thinner') object.scale.z -= steps.scale;
+      if (action === 'reset-transform') {
+        object.rotation.set(0, 0, 0);
+        object.scale.set(1, 1, 1);
+      }
+    });
+  }
+
+  setSelectedModelRotation(degrees) {
+    this.mutateSelectedModel((object) => {
+      object.rotation.y = Number(degrees) * Math.PI / 180;
+    });
+  }
+
+  setSelectedModelScale(axis, value) {
+    this.mutateSelectedModel((object) => {
+      const safe = Math.max(MIN_SCALE, Number(value) || 1);
+      if (axis === 'uniform') object.scale.set(safe, safe, safe);
+      if (axis === 'height') object.scale.y = safe;
+      if (axis === 'width') object.scale.x = safe;
+      if (axis === 'depth') object.scale.z = safe;
+    });
+  }
+
+  applyModelBrightness(placement, brightness) {
+    const object = placement?.object3D;
+    if (!object) return;
+    const b = clampBrightness(brightness);
+    object.traverse((child) => {
+      if (!child.isMesh) return;
+      materialArray(child.material).forEach((material) => applyBrightnessToMaterial(material, b));
+    });
+    this.state.updatePlacedModel(placement.id, { brightness: b, modelBrightness: b });
     refreshSelectionHighlight();
-    this.log(`Updated transform for ${placement.id}`);
+    this.refreshObjects();
   }
 
-  resetTransform() {
-    this.ui.setTransformValues({ position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } });
-    this.applyTransform();
-  }
-
-  moveSelectedToPlayer() {
-    const player = this.options.getPlayerPosition?.() || new THREE.Vector3();
-    const current = this.ui.transformValues();
-    this.ui.setTransformValues({ ...current, position: vectorToPlain(player) });
-    this.applyTransform();
+  changeSelectedBrightness(brightness) {
+    const meta = getSelectedEditableObject();
+    if (!meta) return this.log('Select a surface or model first.');
+    if (meta.supportsTransform) {
+      const placement = this.selectedPlacement();
+      this.applyModelBrightness(placement, brightness);
+      return;
+    }
+    this.applySurfaceBrightness(meta, brightness);
+    this.refreshObjects();
   }
 
   duplicateSelectedModel() {
     const placement = this.selectedPlacement();
     const asset = placement ? this.state.models.find((item) => item.id === placement.modelAssetId) : null;
     if (!placement || !asset) return this.log('Select a placed model to duplicate.');
-    this.ui.root.querySelector('#editor-model-select').value = asset.id;
-    const transform = {
-      position: { ...placement.position, x: placement.position.x + 1 },
-      rotation: placement.rotation,
-      scale: placement.scale
-    };
-    this.placeSelectedModel(transform);
+    this.selectedModelId = asset.id;
+    const duplicate = this.placeModelAtPoint(new THREE.Vector3(placement.position.x + 1, placement.position.y, placement.position.z));
+    if (!duplicate) return;
+    const meta = getSelectedEditableObject();
+    meta.object3D.rotation.set(placement.rotation.x, placement.rotation.y, placement.rotation.z);
+    meta.object3D.scale.set(placement.scale.x, placement.scale.y, placement.scale.z);
+    this.applyModelBrightness(duplicate, placement.modelBrightness || placement.brightness || 1);
+    this.updatePlacementFromObject(duplicate, meta.object3D);
+    this.log(`Duplicated ${placement.id}`);
   }
 
   deleteSelectedModel() {
@@ -456,25 +645,53 @@ class AssetEditor {
     this.options.scene.remove(meta.object3D);
     unregisterEditableObject(placement.id);
     this.state.removePlacedModel(placement.id);
+    clearEditableSelection();
     this.refreshObjects();
     this.log(`Deleted ${placement.id}`);
+  }
+
+  onSelectionChanged(meta) {
+    if (!meta) {
+      this.ui.setSelectedInfo(null);
+      this.ui.setModelControlValues(null);
+      return;
+    }
+    if (meta.supportsTransform) {
+      const placement = this.state.modelPlacement(meta.id);
+      this.ui.setSelectedInfo(meta, {
+        modelName: placement?.modelName,
+        brightness: placement?.modelBrightness || placement?.brightness || 1
+      });
+      this.ui.setModelControlValues(placement);
+      this.setToolMode('edit');
+      return;
+    }
+    const edit = this.state.surfaceEdit(meta.id);
+    this.ui.setSelectedInfo(meta, {
+      textureName: edit?.textureName,
+      brightness: edit?.brightness || 1,
+      repeat: edit?.repeat || { x: 1, y: 1 }
+    });
   }
 
   saveDraft() {
     const draft = this.state.saveDraft(this.currentMapId());
     this.ui.setLastSaved(draft.savedAt);
-    this.log('Local draft saved. Binary files were not stored.');
+    this.log('Local draft saved. Files themselves were not stored.');
   }
 
   loadDraft() {
     try {
+      this.state.placedModels.forEach((placement) => placement.object3D?.parent?.remove(placement.object3D));
+      getEditableObjects().filter((meta) => meta.source === 'editor-import').forEach((meta) => unregisterEditableObject(meta.id));
+      clearEditableSelection();
       const draft = this.state.loadDraft();
       if (!draft) return this.log('No local draft found.');
-      this.ui.setTextureOptions(this.state.textures);
-      this.ui.setModelOptions(this.state.models);
+      this.selectedTextureId = '';
+      this.selectedModelId = '';
+      this.refreshObjects();
       this.ui.setLastSaved(this.state.lastSavedAt);
-      this.updateStats();
-      this.log('Local draft metadata loaded. Re-import files to restore previews.');
+      this.log('Local draft metadata loaded. Re-upload files to restore previews.');
     } catch (error) {
       this.log(`Draft load failed: ${error.message}`);
     }
@@ -486,77 +703,18 @@ class AssetEditor {
     this.log('Local draft cleared.');
   }
 
-  exportManifest() {
-    const manifest = buildAssetManifest({ mapId: this.currentMapId(), mapDisplayName: this.currentMapName(), state: this.state });
-    const text = stringifyManifest(manifest);
-    this.ui.setManifestText(text);
-    const fileName = downloadManifest(manifest);
-    this.log(`Manifest exported: ${fileName}`);
-  }
-
-  async copyManifest() {
-    const text = this.ui.manifestText();
-    if (!text) return this.log('Export a manifest first.');
-    try {
-      await navigator.clipboard?.writeText(text);
-      this.log('Manifest copied to clipboard.');
-    } catch {
-      this.log('Clipboard copy was unavailable. The manifest textarea contains the JSON.');
-    }
-  }
-
-  applyImportedManifest() {
-    try {
-      const { manifest, warnings } = parseManifestJson(this.ui.manifestText());
-      warnings.forEach((warning) => this.state.warn(warning));
-      const missing = [];
-      (manifest.surfaceEdits || []).forEach((edit) => {
-        const meta = getEditableObject(edit.targetId);
-        const texture = this.state.textures.find((item) => item.id === edit.textureId && item.textureObject);
-        if (!meta || !texture) {
-          missing.push(`Missing target or texture for ${edit.targetId}`);
-          return;
-        }
-        this.applyTextureToObject(meta, texture, edit);
-      });
-      (manifest.placedModels || []).forEach((placement) => {
-        const asset = this.state.models.find((item) => item.id === placement.modelAssetId && item.loadedScene);
-        if (!asset) {
-          missing.push(`Missing model asset for ${placement.id}`);
-          return;
-        }
-        this.ui.root.querySelector('#editor-model-select').value = asset.id;
-        this.placeSelectedModel(placement);
-      });
-      missing.forEach((message) => this.state.warn(message));
-      this.log(missing.length ? missing.join('\n') : 'Imported manifest applied to current local assets.');
-    } catch (error) {
-      this.log(`Manifest import failed: ${error.message}`);
-    }
-  }
-
-  handleCanvasPointerDown(event) {
-    if (!this.enabled) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    const rect = this.options.renderer.domElement.getBoundingClientRect();
-    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    this.raycaster.setFromCamera(this.mouse, this.options.camera);
-    const editable = getEditableObjects().map((meta) => meta.object3D);
-    const hit = this.raycaster.intersectObjects(editable, true)[0];
-    if (!hit) return;
-    let object = hit.object;
-    while (object && !object.userData.editableId) object = object.parent;
-    if (object?.userData.editableId) {
-      selectEditableObject(object.userData.editableId);
-      this.refreshObjects();
-    }
+  exportJson() {
+    const data = buildEditorExport({ mapId: this.currentMapId(), mapDisplayName: this.currentMapName(), state: this.state });
+    const text = stringifyEditorExport(data);
+    this.ui.setJsonText(text);
+    const fileName = downloadEditorJson(data);
+    this.log(`Export Editor JSON downloaded: ${fileName}`);
   }
 
   updateStats() {
-    this.ui.setTextureOptions(this.state.textures);
-    this.ui.setModelOptions(this.state.models);
+    this.ui.setTextures(this.state.textures, this.selectedTextureId);
+    this.ui.setModels(this.state.models, this.selectedModelId);
+    this.ui.setPlacedModels(this.state.placedModels, getSelectedEditableObject()?.id);
     this.ui.setCounts({
       textures: this.state.textures.length,
       models: this.state.models.length,

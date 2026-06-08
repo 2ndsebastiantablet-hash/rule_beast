@@ -7,7 +7,7 @@ const entities = readFileSync(new URL('../entities.js', import.meta.url), 'utf8'
 const assetEditor = readFileSync(new URL('../editor/assetEditor.js', import.meta.url), 'utf8');
 const editorRegistry = readFileSync(new URL('../editor/editorRegistry.js', import.meta.url), 'utf8');
 const editorState = readFileSync(new URL('../editor/editorState.js', import.meta.url), 'utf8');
-const editorManifest = readFileSync(new URL('../editor/editorManifest.js', import.meta.url), 'utf8');
+const editorExport = readFileSync(new URL('../editor/editorExport.js', import.meta.url), 'utf8');
 const editorUI = readFileSync(new URL('../editor/editorUI.js', import.meta.url), 'utf8');
 const {
   DEFAULT_MAP_ID,
@@ -105,11 +105,18 @@ assert.ok(main.includes('useStairs'), 'hotel stair endpoints should be usable du
 assert.ok(entities.includes("from './maps.js'"), 'entities should use the dedicated default bunker map definition');
 assert.ok(index.includes('editor/assetEditor.js'), 'index should load the organized asset editor entry module');
 assert.ok(index.indexOf('type="importmap"') < index.indexOf('editor/assetEditor.js'), 'editor preload should stay after the importmap so bare Three.js imports resolve');
-assert.ok(main.includes('EDITOR_ADMIN_CODE'), 'main should expose a prototype-only editor admin unlock code');
+assert.ok(main.includes("const EDITOR_ADMIN_CODE = 'edit'") || main.includes('const EDITOR_ADMIN_CODE = "edit"'), 'main should use the simple prototype editor code edit');
 assert.ok(main.includes('initAssetEditor'), 'main should initialize the local-only asset editor');
+assert.ok(main.includes('AmbientLight') && main.includes('setEditorBrightnessBoost') && main.includes('BASE_FOG_DENSITY'), 'main should include brighter baseline lighting and an editor brightness boost');
+assert.ok(entities.includes('pointIntensityMultiplier'), 'map lights should support a per-map brightness multiplier');
+assert.ok(bunker.lighting && amusement.lighting && hotel.lighting, 'all maps should define readable lighting settings');
 assert.ok(editorRegistry.includes('registerEditableObject') && editorRegistry.includes('selectEditableObject') && editorRegistry.includes('THREE.BoxHelper'), 'editor registry should expose selectable object helpers and highlighting');
-assert.ok(editorState.includes('EDITOR_DRAFT_STORAGE_KEY') && editorState.includes('localStorage.setItem') && !editorState.includes('base64'), 'editor state should save metadata-only local drafts');
-assert.ok(editorManifest.includes('Local blob URLs are temporary') && editorManifest.includes('permanentImportInstructions'), 'editor manifest should explain temporary local asset URLs');
+assert.ok(editorState.includes('EDITOR_DRAFT_STORAGE_KEY') && editorState.includes('surfaceBrightness') && editorState.includes('modelBrightness') && !editorState.includes('base64'), 'editor state should save metadata-only drafts with brightness data');
+assert.ok(editorExport.includes('buildEditorExport') && editorExport.includes('Local files are temporary') && editorExport.includes('downloadEditorJson'), 'editor export should be simple local editor JSON');
 assert.ok(assetEditor.includes('GLTFLoader') && assetEditor.includes('URL.createObjectURL') && assetEditor.includes('visualOnly'), 'asset editor should support local GLB imports as visual-only placements');
-assert.ok(editorUI.includes('EDITOR MODE ENABLED - LOCAL ONLY') && editorUI.includes('Export Asset Manifest JSON'), 'editor UI should expose local-only mode and manifest controls');
-assert.ok(!`${assetEditor}\n${editorRegistry}\n${editorState}\n${editorManifest}\n${editorUI}`.match(/Cloudflare|R2|GitHub API|publishPresence|publishTopic/), 'editor modules must not implement cloud, GitHub API, or InstantDB publishing');
+assert.ok(assetEditor.includes('toolMode') && assetEditor.includes('paintTextureOnSurface') && assetEditor.includes('placeModelAtPoint'), 'asset editor should provide simple paint/place click modes');
+assert.ok(assetEditor.includes('applyBrightnessToMaterial') && assetEditor.includes('applyModelBrightness') && assetEditor.includes('applySurfaceBrightness'), 'asset editor should provide surface and model brightness controls');
+['Rule Beast Asset Editor', 'EDITOR MODE - LOCAL TESTING ONLY', 'My Textures', 'My Models', 'Placed Objects', 'Paint Texture Mode', 'Place Model Mode', 'Move Left', 'Move Right', 'Bigger', 'Smaller', 'Taller', 'Wider', 'Export Editor JSON'].forEach((text) => {
+  assert.ok(editorUI.includes(text), `editor UI should include ${text}`);
+});
+assert.ok(!`${assetEditor}\n${editorRegistry}\n${editorState}\n${editorExport}\n${editorUI}`.match(/Cloudflare|R2|GitHub API|publishPresence|publishTopic|Manifest|manifest/), 'editor modules must stay local-only and avoid manifest/cloud publishing architecture');

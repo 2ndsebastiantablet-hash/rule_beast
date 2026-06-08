@@ -249,6 +249,7 @@ export function createWorld(scene, materials, layout) {
     });
   });
 
+  const pointIntensityMultiplier = layout.lighting?.pointIntensityMultiplier || 1.18;
   const lights = layout.lights?.length ? layout.lights : Array.from({ length: 26 }, (_, i) => ({
     x: -22 + (i % 8) * 6.2,
     z: -18 + Math.floor(i / 8) * 12,
@@ -258,7 +259,7 @@ export function createWorld(scene, materials, layout) {
     flicker: i % 4 === 0
   }));
   lights.forEach((lightInfo) => {
-    const lamp = add(new THREE.PointLight(lightInfo.color, lightInfo.intensity, lightInfo.distance, 2.2));
+    const lamp = add(new THREE.PointLight(lightInfo.color, lightInfo.intensity * pointIntensityMultiplier, lightInfo.distance, 2.2));
     lamp.position.set(lightInfo.x, (lightInfo.y || 0) + 2.65, lightInfo.z);
     lamp.userData.flicker = lightInfo.flicker;
     lamp.userData.baseIntensity = lamp.intensity;
