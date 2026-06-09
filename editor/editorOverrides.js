@@ -157,3 +157,7 @@ export async function loadPermanentEditorOverrides({ scene, mapId }) {
 
   return data;
 }
+
+export async function applyPermanentEditorOverrides(options) {
+  return loadPermanentEditorOverrides(options);
+}
