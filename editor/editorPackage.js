@@ -8,25 +8,29 @@ function packageName(mapId) {
   return `rule_beast_editor_package_${mapId}_${timestamp}.zip`;
 }
 
-export function buildCodexImportPrompt({ mapId, zipFileName }) {
+export function buildCodexImportPrompt({ mapId, zipFileName, packageType = 'updateExistingMap' }) {
   return `Import this Rule Beast editor package and make it permanent.
 
 Package location:
 editor_imports/inbox/${zipFileName}
+
+Package type:
+${packageType}
 
 Tasks:
 
 1. Confirm this is the Rule Beast repo.
 2. Unzip and inspect manifest.json.
 3. Copy textures into assets/editor_maps/${mapId}/textures/.
-4. Copy GLB models into assets/editor_maps/${mapId}/models/.
+4. Copy images into assets/editor_maps/${mapId}/images/ and GIFs into assets/editor_maps/${mapId}/gifs/.
+5. Copy GLB models into assets/editor_maps/${mapId}/models/.
 5. Replace temporary blob URLs with repo-relative asset paths.
 6. Apply surface texture edits permanently.
 7. Apply surface brightness edits permanently.
-8. Add placed GLB models permanently.
-9. Preserve position, rotation, scale, brightness, duplicate/delete state.
-10. Keep models visual-only unless collision is already safely supported.
-11. Update the permanent editor map override for ${mapId}.
+8. Add placedShapes, placedImagePlanes, placed GLB models, collision boxes, spawn markers, puzzle station markers, and lights permanently.
+9. Preserve position, rotation, scale, brightness, collision, and animation settings.
+10. If packageType is newMap, create a new official map option using the manifest spawns and puzzle stations.
+11. If packageType is updateExistingMap, update the existing permanent editor map override for ${mapId}.
 12. Test locally.
 13. Commit and push to main.
 14. Give the exact commit hash.`;
@@ -39,17 +43,22 @@ export async function buildCodexPackage({ mapId, mapDisplayName, state }) {
 
   const textureIds = new Set(state.surfaceEdits.map((edit) => edit.textureId).filter(Boolean));
   const modelIds = new Set(state.placedModels.map((placement) => placement.modelAssetId).filter(Boolean));
+  const imageIds = new Set(state.placedModels.map((placement) => placement.imageAssetId).filter(Boolean));
   const usedTextures = state.textures.filter((texture) => textureIds.has(texture.id));
   const usedModels = state.models.filter((model) => modelIds.has(model.id));
+  const usedImages = state.images.filter((image) => imageIds.has(image.id));
   textureIds.forEach((id) => {
     if (!state.textures.some((texture) => texture.id === id)) warnings.push(`Texture ${id}: This local file is no longer available. Re-upload it before exporting a Codex package.`);
   });
   modelIds.forEach((id) => {
     if (!state.models.some((model) => model.id === id)) warnings.push(`Model ${id}: This local file is no longer available. Re-upload it before exporting a Codex package.`);
   });
+  imageIds.forEach((id) => {
+    if (!state.images.some((image) => image.id === id)) warnings.push(`Image/GIF ${id}: This local file is no longer available. Re-upload it before exporting a Codex package.`);
+  });
 
   const files = {
-    'codex_import_prompt.txt': strToU8(buildCodexImportPrompt({ mapId, zipFileName }))
+    'codex_import_prompt.txt': strToU8(buildCodexImportPrompt({ mapId, zipFileName, packageType: manifest.packageType }))
   };
 
   for (const texture of usedTextures) {
@@ -74,9 +83,23 @@ export async function buildCodexPackage({ mapId, mapDisplayName, state }) {
     files[`models/${filename}`] = new Uint8Array(await model.originalFile.arrayBuffer());
   }
 
+  for (const image of usedImages) {
+    if (!image.originalFile) {
+      warnings.push(`${image.name}: This local file is no longer available. Re-upload it before exporting a Codex package.`);
+      continue;
+    }
+    const folder = image.isGif ? 'gifs' : 'images';
+    const filename = sanitizeFileName(image.name);
+    const manifestImage = manifest.images.find((item) => item.id === image.id);
+    if (manifestImage) manifestImage.packagePath = `${folder}/${filename}`;
+    files[`${folder}/${filename}`] = new Uint8Array(await image.originalFile.arrayBuffer());
+  }
+
   manifest.warnings = [...(manifest.warnings || []), ...warnings];
   manifest.assets = {
     textures: manifest.textures,
+    images: manifest.images.filter((image) => !image.isGif),
+    gifs: manifest.images.filter((image) => image.isGif),
     models: manifest.models
   };
   files['manifest.json'] = strToU8(stringifyEditorExport(manifest));

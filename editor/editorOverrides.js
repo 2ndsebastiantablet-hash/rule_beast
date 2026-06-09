@@ -6,10 +6,13 @@ import {
   unregisterEditableObjectsBySource
 } from './editorRegistry.js';
 import { applyBrightnessToMaterial } from './assetEditor.js';
+import { createShapeObject } from './shapeLibrary.js';
 
 const textureLoader = new THREE.TextureLoader();
 const gltfLoader = new GLTFLoader();
 let permanentOverrideObjects = [];
+let permanentMixers = [];
+let permanentCollisionColliders = [];
 
 function materialsOf(material) {
   if (!material) return [];
@@ -65,10 +68,79 @@ function assetPath(asset) {
   return asset?.repoPath || asset?.permanentUrl || asset?.intendedRepoPath || asset?.temporaryLocalUrl || '';
 }
 
+function plainBoxCollider(id, object, collision) {
+  object.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(object);
+  const min = collision?.min || { x: box.min.x, y: box.min.y, z: box.min.z };
+  const max = collision?.max || { x: box.max.x, y: box.max.y, z: box.max.z };
+  return {
+    id,
+    y: min.y,
+    minY: min.y,
+    maxY: max.y,
+    minX: min.x,
+    maxX: max.x,
+    minZ: min.z,
+    maxZ: max.z
+  };
+}
+
+function registerPermanentObject({ scene, mapId, placement, object, type, supportsTexture = true }) {
+  scene.add(object);
+  permanentOverrideObjects.push(object);
+  if (placement.collision?.enabled) permanentCollisionColliders.push(plainBoxCollider(placement.id, object, placement.collision));
+  registerEditableObject({
+    id: `permanent_${placement.id}`,
+    type,
+    category: `placed-${type}`,
+    mapId,
+    floor: placement.floor || 'ground',
+    zone: placement.zone || 'permanent_editor',
+    object3D: object,
+    materialTarget: object,
+    supportsTexture,
+    supportsTransform: true,
+    source: 'permanent-editor'
+  });
+}
+
+function createImagePlane(imageMeta, placement) {
+  const path = assetPath(imageMeta);
+  const texture = textureLoader.load(path);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const aspect = imageMeta?.width && imageMeta?.height ? imageMeta.width / imageMeta.height : 1.4;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(Math.max(0.6, aspect), 1),
+    new THREE.MeshStandardMaterial({ map: texture, color: 0xffffff, transparent: true, side: THREE.DoubleSide, roughness: 0.62 })
+  );
+  applyTransform(mesh, placement);
+  return mesh;
+}
+
+function setupAnimation(object, gltf, placement) {
+  if (!placement.animation?.autoplay || !gltf.animations?.length) return;
+  const mixer = new THREE.AnimationMixer(object);
+  const clip = gltf.animations[placement.animation.selectedIndex || 0] || gltf.animations[0];
+  const action = mixer.clipAction(clip);
+  action.timeScale = placement.animation.playbackSpeed || 1;
+  action.play();
+  permanentMixers.push(mixer);
+}
+
 export function clearPermanentEditorOverrides(scene) {
   permanentOverrideObjects.forEach((object) => object.parent?.remove(object));
   permanentOverrideObjects = [];
+  permanentMixers = [];
+  permanentCollisionColliders = [];
   unregisterEditableObjectsBySource('permanent-editor');
+}
+
+export function updatePermanentEditorOverrides(delta) {
+  permanentMixers.forEach((mixer) => mixer.update(delta));
+}
+
+export function getPermanentEditorCollisionColliders() {
+  return permanentCollisionColliders;
 }
 
 export async function loadPermanentEditorOverrides({ scene, mapId }) {
@@ -85,8 +157,10 @@ export async function loadPermanentEditorOverrides({ scene, mapId }) {
   }
 
   const textureList = data.textures || data.assets?.textures || [];
+  const imageList = data.images || [...(data.assets?.images || []), ...(data.assets?.gifs || [])];
   const modelList = data.models || data.assets?.models || [];
   const textures = new Map(textureList.map((texture) => [texture.id, texture]));
+  const images = new Map(imageList.map((image) => [image.id, image]));
   const models = new Map(modelList.map((model) => [model.id, model]));
   const loadedTextures = new Map();
 
@@ -136,23 +210,62 @@ export async function loadPermanentEditorOverrides({ scene, mapId }) {
         if (!child.isMesh) return;
         materialsOf(child.material).forEach((material) => applyBrightnessToMaterial(material, placement.modelBrightness ?? placement.brightness ?? 1));
       });
-      scene.add(object);
-      permanentOverrideObjects.push(object);
-      registerEditableObject({
-        id: `permanent_${placement.id}`,
-        type: 'model',
-        category: 'placed-model',
-        mapId,
-        floor: placement.floor || 'ground',
-        zone: placement.zone || 'permanent_editor',
-        object3D: object,
-        supportsTexture: false,
-        supportsTransform: true,
-        source: 'permanent-editor'
-      });
+      setupAnimation(object, gltf, placement);
+      registerPermanentObject({ scene, mapId, placement, object, type: 'model', supportsTexture: false });
     } catch (error) {
       console.warn(`[Rule Beast] editor model failed: ${path}`, error.message);
     }
+  }
+
+  for (const placement of data.placedShapes || []) {
+    try {
+      const object = createShapeObject(placement.shapeId, THREE);
+      if (!object) throw new Error(`Unknown shape ${placement.shapeId}`);
+      applyTransform(object, placement);
+      object.traverse((child) => {
+        if (!child.isMesh) return;
+        materialsOf(child.material).forEach((material) => applyBrightnessToMaterial(material, placement.modelBrightness ?? placement.brightness ?? 1));
+      });
+      registerPermanentObject({ scene, mapId, placement, object, type: 'shape', supportsTexture: true });
+    } catch (error) {
+      console.warn(`[Rule Beast] editor shape failed: ${placement.id}`, error.message);
+    }
+  }
+
+  for (const placement of data.placedImagePlanes || []) {
+    try {
+      const imageMeta = images.get(placement.imageAssetId || placement.imageId);
+      if (!assetPath(imageMeta)) throw new Error('Missing image asset path');
+      const object = createImagePlane(imageMeta, placement);
+      materialsOf(object.material).forEach((material) => applyBrightnessToMaterial(material, placement.modelBrightness ?? placement.brightness ?? 1));
+      registerPermanentObject({ scene, mapId, placement, object, type: placement.isGif ? 'gif' : 'image', supportsTexture: true });
+    } catch (error) {
+      console.warn(`[Rule Beast] editor image plane failed: ${placement.id}`, error.message);
+    }
+  }
+
+  for (const marker of data.spawnMarkers || []) {
+    const object = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 5), new THREE.MeshBasicMaterial({ color: marker.spawnRole === 'monster' ? 0xff3658 : 0x75f6ff }));
+    applyTransform(object, marker);
+    registerPermanentObject({ scene, mapId, placement: marker, object, type: 'spawnMarker', supportsTexture: false });
+  }
+
+  for (const marker of data.puzzleStationMarkers || []) {
+    const object = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.04, 8, 28), new THREE.MeshBasicMaterial({ color: 0x75f6ff }));
+    object.rotation.x = Math.PI / 2;
+    applyTransform(object, marker);
+    registerPermanentObject({ scene, mapId, placement: marker, object, type: 'puzzleStationMarker', supportsTexture: false });
+  }
+
+  for (const lightInfo of data.lights || []) {
+    const light = new THREE.PointLight(lightInfo.color || 0x75f6ff, lightInfo.intensity || 0.8, lightInfo.distance || 8, 2);
+    light.position.set(lightInfo.position?.x || lightInfo.x || 0, lightInfo.position?.y || lightInfo.y || 2.5, lightInfo.position?.z || lightInfo.z || 0);
+    scene.add(light);
+    permanentOverrideObjects.push(light);
+  }
+
+  if (data.packageType === 'newMap' && (!(data.spawnMarkers || []).length || !(data.puzzleStationMarkers || []).length)) {
+    console.warn(`[Rule Beast] editor new map ${mapId} is missing spawn or puzzle station marker data.`);
   }
 
   return data;

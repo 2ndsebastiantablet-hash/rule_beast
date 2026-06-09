@@ -1,6 +1,7 @@
 export const DEFAULT_MAP_ID = 'default_bunker_lab';
 export const AMUSEMENT_PARK_MAP_ID = 'amusement_park';
 export const HOTEL_MAP_ID = 'hotel';
+export const MAP_MAKER_BLANK_MAP_ID = 'map_maker_blank';
 export const WALL_GRID_SIZE = 0.5;
 export const WALL_THICKNESS = 0.55;
 export const WALL_OVERLAP = 0.08;
@@ -428,8 +429,58 @@ export function createHotelLayout(seed = 0) {
   };
 }
 
+export function createBlankMapMakerLayout(seed = 0, mapId = MAP_MAKER_BLANK_MAP_ID, displayName = 'New Map') {
+  const puzzles = [
+    puzzle(-8, -6, 'Map Maker Workspace', 0, 'workspace'),
+    puzzle(0, -6, 'Map Maker Workspace', 1, 'workspace'),
+    puzzle(8, -6, 'Map Maker Workspace', 2, 'workspace'),
+    puzzle(-8, 6, 'Map Maker Workspace', 3, 'workspace'),
+    puzzle(8, 6, 'Map Maker Workspace', 4, 'workspace')
+  ];
+  return {
+    id: mapId,
+    name: displayName,
+    seed,
+    bounds: { x: 0, z: 0, w: 54, d: 48 },
+    rooms: [room('Map Maker Workspace', 0, 0, 30, 22, 0x101923)],
+    corridors: [],
+    grass: [],
+    walls: [
+      wall(`${mapId}-north-boundary`, 0, -23.5, 54, 1.1),
+      wall(`${mapId}-south-boundary`, 0, 23.5, 54, 1.1),
+      wall(`${mapId}-west-boundary`, -26.5, 0, 1.1, 48),
+      wall(`${mapId}-east-boundary`, 26.5, 0, 1.1, 48)
+    ],
+    doors: [],
+    props: [],
+    lights: [
+      light(-10, -8, 0x75f6ff, 0.55, 8),
+      light(10, -8, 0x75f6ff, 0.55, 8),
+      light(0, 8, 0xff536f, 0.34, 7, true)
+    ],
+    lighting: {
+      fogColor: 0x070a13,
+      fogDensity: 0.026,
+      ambientIntensity: 0.44,
+      hemiIntensity: 0.62,
+      keyIntensity: 0.94,
+      pointIntensityMultiplier: 1.2
+    },
+    puzzles,
+    puzzleSlots: puzzles,
+    survivorSpawn: { x: -8, y: 0, z: 8, floor: 'ground' },
+    survivorSpawns: [
+      { x: -8, y: 0, z: 8, floor: 'ground' },
+      { x: -6, y: 0, z: 8, floor: 'ground' },
+      { x: -4, y: 0, z: 8, floor: 'ground' }
+    ],
+    monsterSpawn: { x: 10, y: 0, z: -8, floor: 'ground' }
+  };
+}
+
 export function createMapLayout(mapId = DEFAULT_MAP_ID, seed = 0) {
   if (mapId === AMUSEMENT_PARK_MAP_ID) return createAmusementParkLayout(seed);
   if (mapId === HOTEL_MAP_ID) return createHotelLayout(seed);
+  if (mapId === MAP_MAKER_BLANK_MAP_ID || !MAP_OPTIONS.some((map) => map.id === mapId)) return createBlankMapMakerLayout(seed, mapId);
   return createDefaultBunkerLabLayout(seed);
 }

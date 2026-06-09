@@ -12,7 +12,9 @@ const editorPackage = readFileSync(new URL('../editor/editorPackage.js', import.
 const editorOverrides = readFileSync(new URL('../editor/editorOverrides.js', import.meta.url), 'utf8');
 const editorUI = readFileSync(new URL('../editor/editorUI.js', import.meta.url), 'utf8');
 const importerScript = readFileSync(new URL('../tools/import-editor-package.mjs', import.meta.url), 'utf8');
+const ui = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
 const gitignore = readFileSync(new URL('../.gitignore', import.meta.url), 'utf8');
+const { SHAPE_LIBRARY, SHAPE_CATEGORIES } = await import('../editor/shapeLibrary.js');
 const {
   DEFAULT_MAP_ID,
   MAP_OPTIONS,
@@ -128,6 +130,24 @@ assert.ok(editorPackage.includes('zipSync') && editorPackage.includes('buildCode
 assert.ok(editorOverrides.includes('loadPermanentEditorOverrides') && editorOverrides.includes('applyPermanentEditorOverrides') && editorOverrides.includes('assets/editor_maps') && editorOverrides.includes('latest.json') && editorOverrides.includes('registerEditableObject') && editorOverrides.includes('data.assets?.textures') && editorOverrides.includes('placement.modelId'), 'permanent override loader should fetch static latest.json and register visual-only models');
 assert.ok(importerScript.includes('import-editor-package') && importerScript.includes('assets/editor_maps') && importerScript.includes('latest.json') && importerScript.includes('inflateRawSync') && importerScript.includes('manifest.json') && importerScript.includes('manifest.assets?.textures'), 'importer script should unpack editor ZIPs and write permanent latest.json');
 assert.ok(gitignore.includes('editor_imports/inbox/*.zip') && gitignore.includes('!editor_imports/inbox/.gitkeep'), 'gitignore should keep the inbox folder but ignore package ZIPs');
+assert.equal(SHAPE_LIBRARY.length, 100, 'shape library should expose exactly 100 placeable choices for this request');
+assert.deepEqual(SHAPE_CATEGORIES, ['Basic shapes', 'Architecture', 'Decorative shapes'], 'shape library should only include the requested three sections');
+assert.deepEqual([...new Set(SHAPE_LIBRARY.map((shape) => shape.category))].sort(), ['Architecture', 'Basic shapes', 'Decorative shapes'].sort(), 'shape library should not include horror/lab, theme park, or bonus sections');
+assert.ok(SHAPE_LIBRARY.every((shape) => shape.id && shape.name && shape.category && shape.defaultCollision === true), 'every built-in shape should be selectable and collision-enabled by default');
+assert.ok(ui.includes('Map Maker') && ui.includes('Create New Map') && ui.includes('Edit Existing Map') && ui.includes('onOpenMapMaker'), 'main menu should expose a dedicated Map Maker setup flow');
+assert.ok(main.includes('enterMapMaker') && main.includes('createBlankMapMakerLayout') && main.includes('mapMakerMode') && main.includes('assetEditor?.startMapMakerSession'), 'main should support a local-only map maker mode without a multiplayer lobby');
+assert.ok(main.includes('getEditorCollisionColliders') && main.includes('assetEditor?.collisionColliders'), 'main wall resolution should include editor-created object collision boxes');
+assert.ok(assetEditor.includes('importImage') && assetEditor.includes('placeImageAtPoint') && assetEditor.includes('image/gif') && assetEditor.includes('GIFs display as static'), 'asset editor should import images/GIFs as placeable planes and warn for static GIF display');
+assert.ok(assetEditor.includes('selectShape') && assetEditor.includes('placeShapeAtPoint') && assetEditor.includes('SHAPE_LIBRARY') && assetEditor.includes('createShapeObject'), 'asset editor should expose a built-in shape placement workflow');
+assert.ok(assetEditor.includes('AnimationMixer') && assetEditor.includes('animationMixers') && assetEditor.includes('autoplay'), 'asset editor should detect and autoplay animated GLBs where possible');
+assert.ok(assetEditor.includes('toggleSelectedObjectCollision') && assetEditor.includes('collisionHelpersVisible') && assetEditor.includes('collision: {'), 'asset editor should support collision toggles and helper boxes for placed objects');
+assert.ok(assetEditor.includes("if (code === 'KeyS') return this.modelAction('move-forward'") && assetEditor.includes("if (code === 'KeyW') return this.modelAction('move-back'") && assetEditor.includes("if (code === 'KeyR') return this.modelAction('taller'") && assetEditor.includes("if (code === 'KeyG') return this.modelAction('thinner'"), 'selected object keyboard controls should match the requested PowerPoint-style mapping');
+assert.ok(!editorUI.includes('<h3>Current Tool Mode</h3>') && !editorUI.includes('<h3>Placed Objects</h3>') && !editorUI.includes('<h3>Model Edit Controls</h3>'), 'editor UI should remove old bulky tool mode, placed objects, and model edit sections');
+assert.ok(editorUI.includes('Shape Library') && editorUI.includes('Images / GIFs') && editorUI.includes('Map Package Type') && editorUI.includes('Selected Object') && editorUI.includes('Collision'), 'editor UI should use the simplified Map Maker menu sections');
+assert.ok(editorExport.includes('packageType') && editorExport.includes('displayName') && editorExport.includes('placedShapes') && editorExport.includes('placedImagePlanes') && editorExport.includes('collision') && editorExport.includes('animation'), 'editor export should include new map/update metadata and all new placed object types');
+assert.ok(editorPackage.includes('images/') && editorPackage.includes('gifs/') && editorPackage.includes('packageType is newMap') && editorPackage.includes('placedShapes'), 'Codex package should include images/GIFs and mention new-map/update behavior');
+assert.ok(importerScript.includes('packageType') && importerScript.includes('newMap') && importerScript.includes('updateExistingMap') && importerScript.includes('images') && importerScript.includes('gifs') && importerScript.includes('placedShapes') && importerScript.includes('spawnMarkers') && importerScript.includes('puzzleStationMarkers'), 'importer should understand new-map/update packages and new object arrays');
+assert.ok(editorOverrides.includes('placedShapes') && editorOverrides.includes('placedImagePlanes') && editorOverrides.includes('AnimationMixer') && editorOverrides.includes('collision') && editorOverrides.includes('spawnMarkers') && editorOverrides.includes('puzzleStationMarkers'), 'permanent override loader should load new editor object types and metadata');
 ['Rule Beast Asset Editor', 'EDITOR MODE - LOCAL TESTING ONLY', 'Editor Mode: ON', 'Fly Mode: ON', 'Collision', 'Editor Fly Controls', 'Selected Model Controls', 'Export Editor JSON', 'Export Codex Package'].forEach((text) => {
   assert.ok(editorUI.includes(text), `editor UI should include ${text}`);
 });

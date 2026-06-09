@@ -4,9 +4,13 @@ export const EDITOR_VERSION = 1;
 export class EditorState {
   constructor() {
     this.textures = [];
+    this.images = [];
     this.models = [];
     this.surfaceEdits = [];
     this.placedModels = [];
+    this.packageType = 'updateExistingMap';
+    this.packageMapId = '';
+    this.packageDisplayName = '';
     this.warnings = [];
     this.lastSavedAt = null;
   }
@@ -25,6 +29,15 @@ export class EditorState {
 
   removeTexture(id) {
     this.textures = this.textures.filter((texture) => texture.id !== id);
+  }
+
+  addImage(image) {
+    this.images.push(image);
+    return image;
+  }
+
+  removeImage(id) {
+    this.images = this.images.filter((image) => image.id !== id);
   }
 
   addModel(model) {
@@ -50,6 +63,12 @@ export class EditorState {
 
   removePlacedModel(id) {
     this.placedModels = this.placedModels.filter((item) => item.id !== id);
+  }
+
+  setPackageSettings(settings = {}) {
+    this.packageType = settings.packageType || this.packageType || 'updateExistingMap';
+    this.packageMapId = settings.mapId || this.packageMapId || '';
+    this.packageDisplayName = settings.displayName || this.packageDisplayName || '';
   }
 
   upsertSurfaceEdit(edit) {
@@ -80,8 +99,12 @@ export class EditorState {
     return {
       editorVersion: EDITOR_VERSION,
       mapId,
+      packageType: this.packageType,
+      packageMapId: this.packageMapId,
+      packageDisplayName: this.packageDisplayName,
       savedAt: Date.now(),
       textures: this.textures.map(stripRuntimeTexture),
+      images: this.images.map(stripRuntimeImage),
       models: this.models.map(stripRuntimeModel),
       surfaceEdits: this.surfaceEdits,
       placedModels: this.placedModels.map(stripRuntimePlacement),
@@ -101,6 +124,7 @@ export class EditorState {
     if (!raw) return null;
     const draft = JSON.parse(raw);
     this.textures = (draft.textures || []).map((item) => ({ ...item, missingLocalFile: true }));
+    this.images = (draft.images || []).map((item) => ({ ...item, missingLocalFile: true }));
     this.models = (draft.models || []).map((item) => ({ ...item, missingLocalFile: true }));
     this.surfaceEdits = draft.surfaceEdits || [];
     this.placedModels = (draft.placedModels || []).map((item) => ({
@@ -108,6 +132,9 @@ export class EditorState {
       missingLocalFile: true,
       modelBrightness: item.modelBrightness ?? item.brightness ?? 1
     }));
+    this.packageType = draft.packageType || 'updateExistingMap';
+    this.packageMapId = draft.packageMapId || draft.mapId || '';
+    this.packageDisplayName = draft.packageDisplayName || '';
     this.warnings = draft.warnings || [];
     this.lastSavedAt = draft.savedAt || null;
     this.warn('Draft loaded. Local texture/model files are not stored; re-upload them to preview.');
@@ -125,12 +152,17 @@ export function stripRuntimeTexture(texture) {
   return rest;
 }
 
+export function stripRuntimeImage(image) {
+  const { textureObject, imageElement, originalFile, ...rest } = image;
+  return rest;
+}
+
 export function stripRuntimeModel(model) {
   const { loadedScene, gltf, originalFile, ...rest } = model;
   return rest;
 }
 
 export function stripRuntimePlacement(placement) {
-  const { object3D, ...rest } = placement;
+  const { object3D, collisionHelper, animationMixer, animationAction, ...rest } = placement;
   return rest;
 }

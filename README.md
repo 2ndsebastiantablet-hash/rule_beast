@@ -64,13 +64,15 @@ The Monster is controlled by a player, not by AI. Its base movement is slightly 
 
 `main.js` also creates a VR menu layer in Three.js so menu choices can be selected from inside WebXR.
 
-## Admin Asset Editor
+## Map Maker And Admin Editor
 
-Rule Beast includes a desktop-first, local-only Admin Asset Editor for quick visual asset tests inside the running game. It is hidden by default and unlocks with the prototype admin code `edit`. This code is only a local prototype gate, not production security.
+Rule Beast includes a desktop-first, local-only Admin Asset Editor and a dedicated Map Maker entry from the main menu. The normal in-map editor is still hidden by default and unlocks with the prototype admin code `edit`. This code is only a local prototype gate, not production security.
 
-Open the game, use the small Admin / Editor unlock box, enter `edit`, and the right-side editor panel appears with the indicator `EDITOR MODE - LOCAL TESTING ONLY`. Close Editor hides the panel and returns normal gameplay controls. The editor does not upload files, use the GitHub API, use Cloudflare R2, or sync imported files through InstantDB.
+Open Map Maker from the main menu to create a local editable workspace without starting a multiplayer lobby. The setup screen offers `Create New Map` and `Edit Existing Map`. New maps ask for a map id and display name, then open a blank flat workspace. Existing maps load the selected official map with editor tools enabled. Closing Map Maker returns to the main menu and resets normal map selection so draft maps do not affect multiplayer unless exported and imported later.
 
-Current maps register floors, room slabs, paths, grass, walls, doors, and simple props where available. While editor mode is open, click a registered surface or placed model in the 3D scene; selected items get a yellow bounding-box highlight.
+Open the normal editor in any running map with the small Admin / Editor unlock box and code `edit`. The right-side panel appears with the indicator `EDITOR MODE - LOCAL TESTING ONLY`. Close Editor hides the panel and returns normal gameplay controls. The editor does not upload files, use the GitHub API, use Cloudflare R2, expose secrets, or sync imported files through InstantDB.
+
+Current maps register floors, room slabs, paths, grass, walls, doors, and simple props where available. While editor mode is open, click a registered surface or editor-created object in the 3D scene; selected items get a yellow bounding-box highlight.
 
 Texture workflow:
 
@@ -85,12 +87,35 @@ GLB workflow:
 
 - Import `.glb` files only.
 - Uploaded models appear in `My Models`.
-- Click a model to enter Place Model Mode, then click the map where it should appear.
+- Click a model, then click the map where it should appear.
 - You can also drag a model card from `My Models` into the game canvas.
-- Placed models are visual-only for now and do not add collision.
-- Placed models appear in `Placed Objects` and can be selected by clicking them in the map or the list.
-- Use the PowerPoint-style controls to move left/right/forward/back/up/down, rotate left/right, make bigger/smaller, taller/shorter, wider/narrower, deeper/thinner, duplicate, delete, reset rotation, or reset transform.
+- Placed GLBs use simple box collision by default. Select one and use Collision ON/OFF to toggle it.
+- Animated GLBs are detected. If clips exist, the first animation autoplays on placed copies through `THREE.AnimationMixer`; static GLBs still load normally.
 - The selected model has a brightness slider from 0.25 to 2.5 and updates immediately.
+
+Images / GIFs:
+
+- Import `.png`, `.jpg`, `.jpeg`, `.webp`, or `.gif`.
+- Uploaded images appear in `Images / GIFs`.
+- Click or drag an image/GIF to place it as a flat billboard plane.
+- Image/GIF planes can be moved, rotated, resized, brightened, duplicated, deleted, and exported.
+- GIFs are accepted, but this version warns that GIFs display as static image planes.
+- Image/GIF planes default collision OFF, but can be toggled ON.
+
+Shape Library:
+
+- Map Maker includes exactly 100 built-in shape choices for this task.
+- Only these sections are included: `Basic shapes`, `Architecture`, and `Decorative shapes`.
+- Horror/lab, theme park, and bonus shape sections are intentionally not included.
+- Shapes are searchable and listed in the editor panel.
+- Click or drag a shape, then click the map to place it.
+- Placed shapes are selectable, texture-capable, brightness-capable, duplicate/delete-capable, and collision-enabled by default.
+- Shapes are data-driven in `editor/shapeLibrary.js`; add more by adding a definition with id, name, category, kind, dimensions, and collision defaults.
+
+Map markers:
+
+- The compact marker buttons place Survivor Spawn, Monster Spawn, Puzzle Station, and Point Light markers.
+- New-map Codex Packages should include survivor spawn, monster spawn, and puzzle station marker data. The importer refuses to create a broken new map if required marker data is missing.
 
 Editor Fly Mode:
 
@@ -102,36 +127,49 @@ Editor Fly Mode:
 - Collision OFF lets the editor camera/player pass through walls, floors, ceilings, objects, and map boundaries.
 - Closing the editor clears editor movement keys, restores collision ON, and returns normal gameplay controls.
 
-Keyboard Model Editing:
+Keyboard Object Editing:
 
-- Click a placed model to select it.
-- `Q` makes the selected model bigger.
-- `E` makes the selected model smaller.
-- `W/A/S/D` moves the selected model forward/left/back/right.
-- `Arrow Up` and `Arrow Down` move the selected model up/down.
-- `Arrow Left` and `Arrow Right` rotate the selected model.
-- `Delete` or `Backspace` deletes the selected model.
+- Click a placed model, shape, image/GIF plane, marker, light, wall, floor, or platform object to select it.
+- `A` moves the selected object left.
+- `D` moves the selected object right.
+- `S` moves the selected object forward.
+- `W` moves the selected object backward.
+- `Q` makes the selected object bigger.
+- `E` makes the selected object smaller.
+- `R` makes the selected object taller.
+- `F` makes the selected object shorter.
+- `Z` makes the selected object wider.
+- `X` makes the selected object narrower.
+- `T` makes the selected object deeper.
+- `G` makes the selected object thinner.
+- `Arrow Up` and `Arrow Down` move the selected object up/down.
+- `Arrow Left` and `Arrow Right` rotate the selected object.
+- `Delete` or `Backspace` deletes the selected object.
 - `Esc` clears the selection.
-- While a model is selected, those keys edit the model and do not trigger normal movement, puzzle, attack, or monster ability controls.
+- `C` toggles selected-object collision. When no object is selected, `C` toggles editor fly collision.
+- While an object is selected, those keys edit the object and do not trigger normal movement, puzzle, attack, or monster ability controls.
 
 Local drafts:
 
 - Save Local Draft stores metadata in `localStorage` under `ruleBeastEditorDraftV1`.
-- Drafts do not store binary texture/model files or base64 data.
+- Drafts do not store binary texture/image/GIF/model files or base64 data.
 - Loading a draft may show missing-file warnings because browser blob URLs are temporary and may not survive reloads.
 - If the same browser session still has the uploaded files, loading a draft restores placed model transforms and brightness.
 
 Export Editor JSON:
 
 - Export Editor JSON downloads a readable JSON file and fills the export textarea.
-- The JSON includes map id/name, uploaded texture/model metadata, changed surfaces, brightness settings, placed model transforms, warnings, and a note that local blob URLs are temporary.
+- The JSON includes package type, map id/name, uploaded texture/image/GIF/model metadata, changed surfaces, placed shapes, placed image/GIF planes, placed GLBs, marker/light data, brightness settings, collision settings, animation settings, warnings, and a note that local blob URLs are temporary.
 
 Export Codex Package:
 
 - Export Codex Package downloads a real ZIP using the lightweight browser `fflate` dependency loaded from the import map.
-- The ZIP contains `manifest.json`, `textures/`, `models/`, and `codex_import_prompt.txt`.
-- The ZIP includes the uploaded texture/model files only while those original browser `File` objects are still available in the current session.
-- If package export warns that local files are missing, re-upload the missing texture/model files and export again.
+- The ZIP contains `manifest.json`, `textures/`, `images/`, `gifs/`, `models/`, and `codex_import_prompt.txt`.
+- Set `Map Package Type` to `New Map` or `Update Existing Map` before export.
+- New-map manifests include `packageType: "newMap"`, `mapId`, and `displayName`.
+- Existing-map update manifests include `packageType: "updateExistingMap"`, `mapId`, and `displayName`.
+- The ZIP includes uploaded files only while those original browser `File` objects are still available in the current session.
+- If package export warns that local files are missing, re-upload the missing texture/image/GIF/model files and export again.
 
 Making Editor Changes Permanent:
 
@@ -141,9 +179,11 @@ Making Editor Changes Permanent:
 - Open Codex in the Rule Beast repo.
 - Tell Codex: `Import the latest editor package from editor_imports/inbox and make it permanent.`
 - Codex runs `node tools/import-editor-package.mjs editor_imports/inbox/<package>.zip`.
-- The importer copies assets to `assets/editor_maps/<mapId>/textures/` and `assets/editor_maps/<mapId>/models/`.
+- The importer copies assets to `assets/editor_maps/<mapId>/textures/`, `images/`, `gifs/`, and `models/`.
 - The importer writes `assets/editor_maps/<mapId>/latest.json`.
-- The game loads `assets/editor_maps/<mapId>/latest.json` after the built-in map is created.
+- If `packageType` is `newMap`, the importer validates spawn/puzzle marker data and updates `assets/editor_maps/index.json` so the map can appear in the selector after reload.
+- If `packageType` is `updateExistingMap`, the importer updates the existing map override.
+- The game loads `assets/editor_maps/<mapId>/latest.json` after the built-in or blank editor map is created.
 - Codex commits and pushes. Players refresh/reload to see the permanent map update.
 
 Permanent Override System:
@@ -152,7 +192,7 @@ Permanent Override System:
 - Permanent editor overrides live in `assets/editor_maps/<mapId>/latest.json`.
 - Missing `latest.json` is fine; the game continues with the built-in map.
 - If `latest.json` or an asset fails to load, the loader logs a warning, skips that item, and keeps the map playable.
-- Overrides can apply surface textures, surface brightness, visual-only placed GLB models, model transforms, and model brightness.
+- Overrides can apply surface textures, surface brightness, placed GLB models, animated GLB playback, placed shapes, placed image/GIF planes, collision boxes, spawn markers, puzzle station markers, lights, transforms, and brightness.
 
 Editor Imports Folder:
 
@@ -160,22 +200,23 @@ Editor Imports Folder:
 - `editor_imports/inbox/*.zip` is gitignored so large temporary packages do not get committed by accident.
 - `editor_imports/inbox/.gitkeep` keeps the folder convention in the repo.
 
-Current limitations: local-only testing is not multiplayer synced, imported models are visual-only, there is no cloud publishing, there is no GitHub upload from inside the game, exported packages must be imported by Codex, and large assets can hurt browser or VR performance.
+Current limitations: local-only testing is not multiplayer synced, GIFs display as static image planes in this version, collision is simple bounding-box collision rather than mesh collision, there is no cloud publishing, there is no GitHub upload from inside the game, exported packages must be imported by Codex, and large assets can hurt browser or VR performance.
 
 ## Main Files
 
 - `index.html`: page shell, import map, `fflate` browser ZIP dependency, CSS, containers, and script loading.
-- `main.js`: Three.js renderer/bootstrap, WebXR setup, brighter global/map lighting, local admin editor initialization, editor fly/collision routing, permanent override loading, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
+- `main.js`: Three.js renderer/bootstrap, WebXR setup, brighter global/map lighting, local admin editor and Map Maker initialization, editor fly/collision routing, editor-created collision colliders, permanent override loading, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
 - `entities.js`: materials, map loading, editable surface registration, multi-floor world geometry, rooms, corridors, walls, doors, stairwell markers, boosted map lights, props, player/monster models, local hands, puzzle station meshes, remote markers, corpses, and distance helpers.
-- `maps.js`: map IDs/options, `default_bunker_lab`, `amusement_park`, and `hotel` definitions, map lighting profiles, wall snapping/overlap helpers, map factory, floor heights, room/path sizes, grass sections, wall colliders, stair connections, doors, spawn points, puzzle station zones, and light positions.
-- `editor/assetEditor.js`: local-only editor coordinator for admin unlock, texture imports, GLB imports, click/drag paint and place modes, editor fly/collision state, keyboard model editing, brightness, model transforms, canvas selection, draft actions, and export actions.
+- `maps.js`: map IDs/options, blank Map Maker workspace layout, `default_bunker_lab`, `amusement_park`, and `hotel` definitions, map lighting profiles, wall snapping/overlap helpers, map factory, floor heights, room/path sizes, grass sections, wall colliders, stair connections, doors, spawn points, puzzle station zones, and light positions.
+- `editor/assetEditor.js`: local-only editor coordinator for admin unlock, Map Maker sessions, texture imports, image/GIF imports, GLB imports, animated GLB mixers, built-in shape placement, marker/light placement, click/drag paint and place modes, editor fly/collision state, selected-object keyboard editing, brightness, transforms, canvas selection, draft actions, and export actions.
+- `editor/shapeLibrary.js`: data-driven 100-entry shape registry limited to Basic shapes, Architecture, and Decorative shapes, plus Three.js primitive/group shape factory.
 - `editor/editorRegistry.js`: editable object registry, selection helpers, and BoxHelper highlighting.
 - `editor/editorState.js`: editor runtime state and metadata-only local draft save/load.
-- `editor/editorUI.js`: DOM editor unlock box, scrollable editor panel, upload lists, mode buttons, placed object list, and simple model controls.
-- `editor/editorExport.js`: simple Export Editor JSON builder and download helper.
-- `editor/editorPackage.js`: Export Codex Package ZIP builder and `codex_import_prompt.txt` generator.
-- `editor/editorOverrides.js`: permanent static editor override loader for `assets/editor_maps/<mapId>/latest.json`.
-- `tools/import-editor-package.mjs`: Node importer for `editor_imports/inbox/*.zip` packages.
+- `editor/editorUI.js`: DOM editor unlock box, scrollable simplified editor panel, upload lists, shape library search, package type fields, selected object info, collision controls, save/export controls, and keyboard help.
+- `editor/editorExport.js`: Export Editor JSON builder for new-map/update metadata, assets, placed objects, collision, animation, markers, lights, and download helper.
+- `editor/editorPackage.js`: Export Codex Package ZIP builder for textures, images, GIFs, models, manifest, and `codex_import_prompt.txt`.
+- `editor/editorOverrides.js`: permanent static editor override loader for `assets/editor_maps/<mapId>/latest.json`, including placed shapes, image/GIF planes, GLBs, animations, collision, markers, and lights.
+- `tools/import-editor-package.mjs`: Node importer for `editor_imports/inbox/*.zip` packages, including new-map/update handling, asset copying, required marker validation, and editor map index updates.
 - `assets/editor_maps/`: permanent editor override assets and `latest.json` files by map id.
 - `editor_imports/inbox/`: local inbox for future editor package ZIPs.
 - `data.js`: lobby state constants, monster ability pool, puzzle type definitions, and game tuning constants.

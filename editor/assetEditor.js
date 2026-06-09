@@ -4,6 +4,7 @@ import { EditorUI } from './editorUI.js';
 import { EditorState } from './editorState.js';
 import { buildEditorExport, downloadEditorJson, stringifyEditorExport } from './editorExport.js';
 import { buildCodexPackage, downloadCodexPackage } from './editorPackage.js';
+import { SHAPE_CATEGORIES, SHAPE_LIBRARY, createShapeObject, getShapeDefinition } from './shapeLibrary.js';
 import {
   getEditableObject,
   getEditableObjects,
@@ -18,7 +19,9 @@ import {
 } from './editorRegistry.js';
 
 const TEXTURE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
 const TEXTURE_MIMES = ['image/png', 'image/jpeg', 'image/webp'];
+const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const GLB_MIMES = ['model/gltf-binary', 'application/octet-stream', ''];
 const MIN_SCALE = 0.1;
 const EDITOR_MOVE_STEP = 0.5;
@@ -26,9 +29,9 @@ const EDITOR_VERTICAL_MOVE_STEP = 0.5;
 const EDITOR_ROTATE_STEP = Math.PI / 12;
 const EDITOR_SCALE_STEP = 0.1;
 const EDITOR_FLY_SPEED = 8.5;
-const MODEL_KEY_CODES = ['KeyQ', 'KeyE', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Backspace', 'Escape'];
+const MODEL_KEY_CODES = ['KeyQ', 'KeyE', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyR', 'KeyF', 'KeyZ', 'KeyX', 'KeyT', 'KeyG', 'KeyC', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Backspace', 'Escape'];
 const FLY_KEY_CODES = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight'];
-const GAME_ACTION_CODES = ['KeyE', 'KeyF', 'KeyQ', 'KeyR', 'Space'];
+const GAME_ACTION_CODES = ['KeyE', 'KeyF', 'KeyQ', 'KeyR', 'KeyZ', 'KeyX', 'KeyT', 'KeyG', 'Space'];
 
 const nextId = (prefix, list) => `${prefix}_${String(list.length + 1).padStart(3, '0')}_${Date.now().toString(36)}`;
 const repoPath = (folder, name) => `assets/${folder}/${name.replace(/[^a-z0-9._-]/gi, '_')}`;
@@ -69,6 +72,14 @@ function assignMaterial(target, materials) {
 }
 
 function ensureEditableMaterials(target) {
+  if (!target?.material && target?.traverse) {
+    const materials = [];
+    target.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      materials.push(...ensureEditableMaterials(child));
+    });
+    return materials;
+  }
   if (!target?.material) return [];
   target.userData ||= {};
   if (!target.userData.editorOriginalMaterials) target.userData.editorOriginalMaterials = cloneMaterialValue(target.material);
@@ -80,6 +91,11 @@ function ensureEditableMaterials(target) {
 }
 
 function resetEditableMaterials(target) {
+  if (!target?.material && target?.traverse) {
+    let reset = false;
+    target.traverse((child) => { reset = resetEditableMaterials(child) || reset; });
+    return reset;
+  }
   if (!target?.userData?.editorOriginalMaterials) return false;
   target.material = cloneMaterialValue(target.userData.editorOriginalMaterials);
   target.userData.editorMaterialCloned = false;
@@ -96,9 +112,16 @@ class AssetEditor {
     this.enabled = false;
     this.toolMode = 'select';
     this.selectedTextureId = '';
+    this.selectedImageId = '';
     this.selectedModelId = '';
+    this.selectedShapeId = '';
     this.editorCollisionEnabled = true;
     this.editorKeys = new Set();
+    this.animationMixers = new Map();
+    this.collisionHelpersVisible = false;
+    this.collisionHelperGroup = new THREE.Group();
+    this.collisionHelperGroup.name = 'editor-collision-helpers';
+    this.options.scene.add(this.collisionHelperGroup);
     this.messages = [];
     initializeEditableRegistry(options.scene);
     setSelectionChangedHandler((meta) => this.onSelectionChanged(meta));
@@ -109,10 +132,16 @@ class AssetEditor {
       importTexture: (file) => this.importTexture(file),
       selectTexture: (id) => this.selectTexture(id),
       removeTexture: (id) => this.removeTexture(id),
+      importImage: (file) => this.importImage(file),
+      selectImage: (id) => this.selectImage(id),
+      removeImage: (id) => this.removeImage(id),
       importModel: (file) => this.importModel(file),
       selectModel: (id) => this.selectModel(id),
       removeModel: (id) => this.removeModel(id),
+      selectShape: (id) => this.selectShape(id),
+      placeMarker: (kind) => this.placeMapMarker(kind),
       selectPlacedModel: (id) => this.selectPlacedModel(id),
+      updatePackageSettings: (settings) => this.updatePackageSettings(settings),
       applySelectedTexture: () => this.applySelectedTextureToSelectedSurface(),
       resetSurface: () => this.resetSelectedSurface(),
       changeBrightness: (brightness) => this.changeSelectedBrightness(brightness),
@@ -127,7 +156,8 @@ class AssetEditor {
       clearDraft: () => this.clearDraft(),
       exportJson: () => this.exportJson(),
       exportCodexPackage: () => this.exportCodexPackage(),
-      toggleCollision: () => this.toggleEditorCollision()
+      toggleCollision: () => this.toggleSelectedObjectCollision(),
+      toggleCollisionHelpers: () => this.toggleCollisionHelpers()
     });
     options.renderer.domElement.addEventListener('pointerdown', (event) => this.handleCanvasPointerDown(event), true);
     options.renderer.domElement.addEventListener('dragover', (event) => this.handleCanvasDragOver(event), true);
@@ -141,7 +171,38 @@ class AssetEditor {
   }
 
   currentMapName() {
-    return this.options.getCurrentMapName?.() || this.currentMapId();
+    return this.state.packageDisplayName || this.options.getCurrentMapName?.() || this.currentMapId();
+  }
+
+  packageMapId() {
+    return this.state.packageMapId || this.currentMapId();
+  }
+
+  updatePackageSettings(settings = {}) {
+    this.state.setPackageSettings(settings);
+    this.ui.setPackageSettings?.({
+      packageType: this.state.packageType,
+      mapId: this.packageMapId(),
+      displayName: this.currentMapName()
+    });
+    this.refreshObjects();
+  }
+
+  startMapMakerSession(settings = {}) {
+    this.enabled = true;
+    this.editorKeys.clear();
+    this.state.setPackageSettings(settings);
+    this.ui.setUnlocked(true);
+    this.ui.setMapMakerMode?.(true);
+    this.ui.setPackageSettings?.({
+      packageType: this.state.packageType,
+      mapId: this.packageMapId(),
+      displayName: this.currentMapName()
+    });
+    this.setToolMode('select');
+    this.options.onEditorModeChange?.(true);
+    this.refreshObjects();
+    this.log('Map Maker enabled. Local-only workspace.');
   }
 
   isEditorModeActive() {
@@ -182,6 +243,23 @@ class AssetEditor {
     this.refreshObjects();
     this.log(`Editor collision ${this.editorCollisionEnabled ? 'ON' : 'OFF'}.`);
     return this.editorCollisionEnabled;
+  }
+
+  toggleCollisionHelpers() {
+    this.collisionHelpersVisible = !this.collisionHelpersVisible;
+    this.refreshCollisionHelpers();
+    this.log(`Collision helper boxes ${this.collisionHelpersVisible ? 'shown' : 'hidden'}.`);
+  }
+
+  toggleSelectedObjectCollision() {
+    const placement = this.selectedPlacement();
+    if (!placement) return this.toggleEditorCollision();
+    placement.collision ||= { enabled: true, type: 'box', size: { x: 1, y: 1, z: 1 }, offset: { x: 0, y: 0, z: 0 } };
+    placement.collision.enabled = !placement.collision.enabled;
+    this.updatePlacementCollision(placement, placement.object3D);
+    this.refreshObjects();
+    this.log(`${placement.id} collision ${placement.collision.enabled ? 'ON' : 'OFF'}.`);
+    return placement.collision.enabled;
   }
 
   handleEditorKeyboard(event, pressed = true) {
@@ -236,10 +314,17 @@ class AssetEditor {
     const verticalMove = steps.verticalMove || steps.move || EDITOR_VERTICAL_MOVE_STEP;
     if (code === 'KeyQ') return this.modelAction('bigger', steps);
     if (code === 'KeyE') return this.modelAction('smaller', steps);
-    if (code === 'KeyW') return this.modelAction('move-forward', steps);
+    if (code === 'KeyW') return this.modelAction('move-back', steps);
     if (code === 'KeyA') return this.modelAction('move-left', steps);
-    if (code === 'KeyS') return this.modelAction('move-back', steps);
+    if (code === 'KeyS') return this.modelAction('move-forward', steps);
     if (code === 'KeyD') return this.modelAction('move-right', steps);
+    if (code === 'KeyR') return this.modelAction('taller', steps);
+    if (code === 'KeyF') return this.modelAction('shorter', steps);
+    if (code === 'KeyZ') return this.modelAction('wider', steps);
+    if (code === 'KeyX') return this.modelAction('narrower', steps);
+    if (code === 'KeyT') return this.modelAction('deeper', steps);
+    if (code === 'KeyG') return this.modelAction('thinner', steps);
+    if (code === 'KeyC') return this.toggleSelectedObjectCollision();
     if (code === 'ArrowUp') return this.modelAction('move-up', { ...steps, move: verticalMove });
     if (code === 'ArrowDown') return this.modelAction('move-down', { ...steps, move: verticalMove });
     if (code === 'ArrowLeft') return this.modelAction('rotate-left', steps);
@@ -273,6 +358,7 @@ class AssetEditor {
     this.editorCollisionEnabled = true;
     clearEditableSelection();
     this.ui.setUnlocked(false);
+    this.ui.setMapMakerMode?.(false);
     this.options.onEditorModeChange?.(false);
     this.log('Editor closed. Normal gameplay controls restored.');
   }
@@ -293,8 +379,15 @@ class AssetEditor {
       selectedId: selected?.id || 'none'
     });
     this.ui.setTextures(this.state.textures, this.selectedTextureId);
+    this.ui.setImages?.(this.state.images, this.selectedImageId);
     this.ui.setModels(this.state.models, this.selectedModelId);
+    this.ui.setShapes?.(SHAPE_LIBRARY, SHAPE_CATEGORIES, this.selectedShapeId);
     this.ui.setPlacedModels(this.state.placedModels, selected?.id);
+    this.ui.setPackageSettings?.({
+      packageType: this.state.packageType,
+      mapId: this.packageMapId(),
+      displayName: this.currentMapName()
+    });
     this.updateStats();
   }
 
@@ -314,8 +407,28 @@ class AssetEditor {
     this.log('Texture removed from My Textures.');
   }
 
+  selectImage(id) {
+    this.selectedImageId = id;
+    this.selectedModelId = '';
+    this.selectedShapeId = '';
+    this.setToolMode('place');
+    this.refreshObjects();
+    this.log('Image/GIF selected. Click the map or drag it into the canvas.');
+  }
+
+  removeImage(id) {
+    const image = this.state.images.find((item) => item.id === id);
+    if (image?.temporaryLocalUrl) URL.revokeObjectURL(image.temporaryLocalUrl);
+    this.state.removeImage(id);
+    if (this.selectedImageId === id) this.selectedImageId = '';
+    this.refreshObjects();
+    this.log('Image/GIF removed from My Images.');
+  }
+
   selectModel(id) {
     this.selectedModelId = id;
+    this.selectedImageId = '';
+    this.selectedShapeId = '';
     this.setToolMode('place');
     this.refreshObjects();
     this.log('Model selected. Click the map or drag the model into the canvas.');
@@ -328,6 +441,17 @@ class AssetEditor {
     if (this.selectedModelId === id) this.selectedModelId = '';
     this.refreshObjects();
     this.log('Model removed from My Models. Already placed copies stay in the map.');
+  }
+
+  selectShape(id) {
+    const shape = getShapeDefinition(id);
+    if (!shape) return this.log('Shape not found.');
+    this.selectedShapeId = id;
+    this.selectedModelId = '';
+    this.selectedImageId = '';
+    this.setToolMode('place');
+    this.refreshObjects();
+    this.log(`Shape selected: ${shape.name}. Click the map to place it.`);
   }
 
   selectPlacedModel(id) {
@@ -378,6 +502,49 @@ class AssetEditor {
     }
   }
 
+  validateImage(file) {
+    if (!file) throw new Error('Choose an image or GIF file first.');
+    const lower = file.name.toLowerCase();
+    if (!IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext)) || !IMAGE_MIMES.includes(file.type)) throw new Error('Use png, jpg, jpeg, webp, or gif images.');
+  }
+
+  async importImage(file) {
+    try {
+      this.validateImage(file);
+      const url = URL.createObjectURL(file);
+      const lower = file.name.toLowerCase();
+      const isGif = lower.endsWith('.gif') || file.type === 'image/gif';
+      const warnings = [];
+      if (file.size > 8 * 1024 * 1024) warnings.push('Image/GIF is over 8 MB.');
+      if (isGif) warnings.push('GIFs display as static image planes in this version.');
+      const texture = await this.loadTexture(url);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const imageElement = await this.loadImage(url).catch(() => null);
+      const meta = this.state.addImage({
+        id: nextId(isGif ? 'gifAsset' : 'imageAsset', this.state.images),
+        name: file.name,
+        fileType: file.type,
+        fileSizeBytes: file.size,
+        isGif,
+        width: imageElement?.naturalWidth || null,
+        height: imageElement?.naturalHeight || null,
+        temporaryLocalUrl: url,
+        intendedRepoPath: repoPath(isGif ? 'gifs' : 'images', file.name),
+        createdAt: Date.now(),
+        warnings,
+        textureObject: texture,
+        imageElement,
+        originalFile: file
+      });
+      warnings.forEach((warning) => this.state.warn(`${file.name}: ${warning}`));
+      this.selectImage(meta.id);
+      this.log(`Image/GIF uploaded: ${file.name}`);
+    } catch (error) {
+      this.state.warn(error.message);
+      this.log(error.message);
+    }
+  }
+
   loadTexture(url) {
     return new Promise((resolve, reject) => {
       new THREE.TextureLoader().load(url, resolve, undefined, reject);
@@ -412,6 +579,8 @@ class AssetEditor {
         temporaryLocalUrl: url,
         intendedRepoPath: repoPath('models', file.name),
         createdAt: Date.now(),
+        animations: (gltf.animations || []).map((clip, index) => ({ index, name: clip.name || `Animation ${index + 1}` })),
+        defaultAnimation: gltf.animations?.length ? { selectedIndex: 0, autoplay: true, playbackSpeed: 1 } : null,
         warnings,
         loadedScene: gltf.scene,
         gltf,
@@ -442,7 +611,7 @@ class AssetEditor {
     });
     if (meshes > 100) warnings.push('Model has many meshes.');
     if (materials.size > 20) warnings.push('Model has many materials.');
-    if (gltf.animations?.length) warnings.push('Animations are ignored in this simple editor.');
+    if (gltf.animations?.length) warnings.push('Animations detected; the first animation autoplays on placed copies.');
     return warnings;
   }
 
@@ -468,7 +637,7 @@ class AssetEditor {
       if (!target.meta) return this.log('Click an editable surface to paint it.');
       return this.paintTextureOnSurface(target.meta);
     }
-    if (this.toolMode === 'place') return this.placeModelAtPoint(target.point);
+    if (this.toolMode === 'place') return this.placeSelectedAssetAtPoint(target.point);
     if (target.meta) {
       selectEditableObject(target.meta.id);
       if (target.meta.supportsTransform) this.setToolMode('edit');
@@ -498,7 +667,21 @@ class AssetEditor {
     }
     if (payload.kind === 'model') {
       this.selectedModelId = payload.id;
-      return this.placeModelAtPoint(target.point);
+      this.selectedShapeId = '';
+      this.selectedImageId = '';
+      return this.placeSelectedAssetAtPoint(target.point);
+    }
+    if (payload.kind === 'shape') {
+      this.selectedShapeId = payload.id;
+      this.selectedModelId = '';
+      this.selectedImageId = '';
+      return this.placeSelectedAssetAtPoint(target.point);
+    }
+    if (payload.kind === 'image') {
+      this.selectedImageId = payload.id;
+      this.selectedModelId = '';
+      this.selectedShapeId = '';
+      return this.placeSelectedAssetAtPoint(target.point);
     }
   }
 
@@ -600,20 +783,131 @@ class AssetEditor {
     return clone;
   }
 
+  placementPosition(point = null) {
+    const player = this.options.getPlayerPosition?.() || new THREE.Vector3(0, 0, 0);
+    return point
+      ? { x: Number(point.x.toFixed(3)), y: Number(Math.max(-8, point.y).toFixed(3)), z: Number(point.z.toFixed(3)) }
+      : { x: Number((player.x + 1.5).toFixed(3)), y: Number((player.y || 0).toFixed(3)), z: Number((player.z - 1.5).toFixed(3)) };
+  }
+
+  placeSelectedAssetAtPoint(point = null) {
+    if (this.selectedShapeId) return this.placeShapeAtPoint(point);
+    if (this.selectedImageId) return this.placeImageAtPoint(point);
+    return this.placeModelAtPoint(point);
+  }
+
+  semanticRoleForShape(shape) {
+    if (!shape) return 'shape';
+    if (shape.id.includes('wall') || shape.id.includes('fence') || shape.id.includes('barrier') || shape.id.includes('gate')) return 'wall';
+    if (shape.id.includes('floor') || shape.id.includes('tile')) return 'floor';
+    if (shape.id.includes('platform') || shape.id.includes('bridge') || shape.id.includes('catwalk')) return 'platform';
+    return 'shape';
+  }
+
+  collisionFromObject(object, enabled = true) {
+    object.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(object);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+    return {
+      enabled,
+      type: 'box',
+      size: toPlainVector(size),
+      offset: toPlainVector(center.clone().sub(object.position)),
+      min: toPlainVector(box.min),
+      max: toPlainVector(box.max)
+    };
+  }
+
+  updatePlacementCollision(placement, object = placement?.object3D) {
+    if (!placement || !object) return;
+    const enabled = placement.collision?.enabled !== false;
+    placement.collision = this.collisionFromObject(object, enabled);
+    this.state.updatePlacedModel(placement.id, { collision: placement.collision });
+    this.refreshCollisionHelpers();
+  }
+
+  collisionColliders() {
+    return this.state.placedModels
+      .filter((placement) => placement.collision?.enabled && placement.collision.min && placement.collision.max)
+      .map((placement) => ({
+        id: placement.id,
+        y: placement.collision.min.y,
+        minY: placement.collision.min.y,
+        maxY: placement.collision.max.y,
+        minX: placement.collision.min.x,
+        maxX: placement.collision.max.x,
+        minZ: placement.collision.min.z,
+        maxZ: placement.collision.max.z
+      }));
+  }
+
+  refreshCollisionHelpers() {
+    this.collisionHelperGroup.clear();
+    if (!this.collisionHelpersVisible) return;
+    this.state.placedModels.forEach((placement) => {
+      if (!placement.collision?.enabled || !placement.object3D) return;
+      const helper = new THREE.BoxHelper(placement.object3D, 0x75f6ff);
+      helper.userData.collisionHelper = true;
+      this.collisionHelperGroup.add(helper);
+    });
+  }
+
+  registerPlacement(placement, object, meta = {}) {
+    placement.object3D = object;
+    this.updatePlacementCollision(placement, object);
+    registerEditableObject({
+      id: placement.id,
+      type: placement.objectType || 'model',
+      category: placement.objectType === 'model' ? 'placed-model' : `placed-${placement.objectType}`,
+      mapId: placement.mapId,
+      floor: placement.floor,
+      zone: placement.zone,
+      object3D: object,
+      materialTarget: object,
+      supportsTexture: placement.supportsTexture !== false,
+      supportsTransform: true,
+      source: 'editor-import',
+      ...meta
+    });
+    selectEditableObject(placement.id);
+    this.setToolMode('edit');
+    this.refreshObjects();
+    return placement;
+  }
+
+  setupPlacementAnimation(placement, asset) {
+    if (!placement?.animation?.hasAnimations || !asset?.gltf?.animations?.length || !placement.object3D) return;
+    const mixer = new THREE.AnimationMixer(placement.object3D);
+    const selectedIndex = placement.animation.selectedIndex || 0;
+    const clip = asset.gltf.animations[selectedIndex] || asset.gltf.animations[0];
+    if (!clip) return;
+    const action = mixer.clipAction(clip);
+    action.timeScale = placement.animation.playbackSpeed || 1;
+    if (placement.animation.autoplay !== false) action.play();
+    placement.animation.selectedName = clip.name || `Animation ${selectedIndex + 1}`;
+    placement.animation.supported = true;
+    this.animationMixers.set(placement.id, { mixer, action });
+  }
+
+  update(delta) {
+    this.animationMixers.forEach(({ mixer }) => mixer.update(delta));
+  }
+
   placeModelAtPoint(point = null) {
     const asset = this.state.models.find((item) => item.id === this.selectedModelId);
     if (!asset?.loadedScene) return this.log('Select an uploaded GLB model first.');
     const object = this.cloneModelScene(asset.loadedScene);
-    const player = this.options.getPlayerPosition?.() || new THREE.Vector3(0, 0, 0);
-    const position = point
-      ? { x: point.x, y: Math.max(-8, point.y), z: point.z }
-      : { x: player.x + 1.5, y: player.y || 0, z: player.z - 1.5 };
+    const position = this.placementPosition(point);
     object.position.set(position.x, position.y, position.z);
     object.rotation.set(0, 0, 0);
     object.scale.set(1, 1, 1);
     this.options.scene.add(object);
     const placement = this.state.addPlacedModel({
       id: nextId('placedModel', this.state.placedModels),
+      objectType: 'model',
       modelAssetId: asset.id,
       modelName: asset.name,
       mapId: this.currentMapId(),
@@ -624,25 +918,165 @@ class AssetEditor {
       scale: { x: 1, y: 1, z: 1, uniform: 1 },
       brightness: 1,
       modelBrightness: 1,
-      visualOnly: true,
+      visualOnly: false,
+      collision: {
+        enabled: true,
+        type: 'box',
+        size: { x: 1, y: 1, z: 1 },
+        offset: { x: 0, y: 0, z: 0 }
+      },
+      animation: asset.defaultAnimation ? { ...asset.defaultAnimation, clips: asset.animations || [], hasAnimations: true } : null,
       object3D: object
     });
-    registerEditableObject({
-      id: placement.id,
-      type: 'model',
-      category: 'placed-model',
-      mapId: placement.mapId,
-      floor: placement.floor,
-      zone: placement.zone,
-      object3D: object,
-      supportsTexture: false,
-      supportsTransform: true,
-      source: 'editor-import'
+    this.setupPlacementAnimation(placement, asset);
+    this.registerPlacement(placement, object, { supportsTexture: false });
+    this.log(`Placed model with box collision: ${asset.name}`);
+    return placement;
+  }
+
+  placeShapeAtPoint(point = null) {
+    const shape = getShapeDefinition(this.selectedShapeId);
+    if (!shape) return this.log('Select a built-in shape first.');
+    const object = createShapeObject(shape, THREE);
+    const position = this.placementPosition(point);
+    object.position.set(position.x, position.y + Math.max(0.05, shape.dimensions.y / 2), position.z);
+    object.rotation.set(0, 0, 0);
+    object.scale.set(1, 1, 1);
+    this.options.scene.add(object);
+    const semanticRole = this.semanticRoleForShape(shape);
+    const placement = this.state.addPlacedModel({
+      id: nextId('placedShape', this.state.placedModels),
+      objectType: 'shape',
+      shapeId: shape.id,
+      shapeName: shape.name,
+      category: shape.category,
+      semanticRole,
+      mapId: this.currentMapId(),
+      floor: this.floorFromY(object.position.y),
+      zone: 'editor_shape',
+      position: toPlainVector(object.position),
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1, uniform: 1 },
+      brightness: 1,
+      modelBrightness: 1,
+      supportsTexture: true,
+      collision: {
+        enabled: shape.defaultCollision !== false,
+        type: 'box',
+        size: { x: 1, y: 1, z: 1 },
+        offset: { x: 0, y: 0, z: 0 }
+      },
+      object3D: object
     });
-    selectEditableObject(placement.id);
-    this.setToolMode('edit');
-    this.refreshObjects();
-    this.log(`Placed visual-only model: ${asset.name}`);
+    this.registerPlacement(placement, object, { type: 'shape', category: `shape-${shape.category}` });
+    this.log(`Placed shape: ${shape.name}`);
+    return placement;
+  }
+
+  placeImageAtPoint(point = null) {
+    const image = this.state.images.find((item) => item.id === this.selectedImageId);
+    if (!image?.textureObject) return this.log('Select an uploaded image or GIF first.');
+    const texture = image.textureObject.clone();
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const aspect = image.width && image.height ? image.width / image.height : 1.4;
+    const material = new THREE.MeshStandardMaterial({
+      map: texture,
+      color: 0xffffff,
+      roughness: 0.62,
+      metalness: 0.02,
+      transparent: true,
+      side: THREE.DoubleSide
+    });
+    const object = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(0.6, aspect), 1), material);
+    const position = this.placementPosition(point);
+    object.position.set(position.x, position.y + 1.2, position.z);
+    object.rotation.y = Math.PI;
+    object.castShadow = true;
+    this.options.scene.add(object);
+    const placement = this.state.addPlacedModel({
+      id: nextId(image.isGif ? 'placedGif' : 'placedImage', this.state.placedModels),
+      objectType: image.isGif ? 'gif' : 'image',
+      imageAssetId: image.id,
+      imageName: image.name,
+      isGif: image.isGif,
+      mapId: this.currentMapId(),
+      floor: this.floorFromY(object.position.y),
+      zone: 'editor_image',
+      position: toPlainVector(object.position),
+      rotation: toPlainVector(object.rotation),
+      scale: { x: 1, y: 1, z: 1, uniform: 1 },
+      brightness: 1,
+      modelBrightness: 1,
+      supportsTexture: true,
+      collision: {
+        enabled: false,
+        type: 'box',
+        size: { x: 1, y: 1, z: 1 },
+        offset: { x: 0, y: 0, z: 0 }
+      },
+      object3D: object
+    });
+    this.registerPlacement(placement, object, { type: placement.objectType, category: 'placed-image' });
+    this.log(`Placed ${image.isGif ? 'GIF' : 'image'} plane: ${image.name}`);
+    return placement;
+  }
+
+  placeMapMarker(kind = 'puzzle') {
+    const position = this.placementPosition(null);
+    let object = null;
+    let placement = null;
+    if (kind === 'light') {
+      object = new THREE.Group();
+      const light = new THREE.PointLight(0x75f6ff, 0.8, 8, 2);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshBasicMaterial({ color: 0x75f6ff }));
+      object.add(light, bulb);
+      object.position.set(position.x, position.y + 2.5, position.z);
+      placement = this.state.addPlacedModel({
+        id: nextId('placedLight', this.state.placedModels),
+        objectType: 'light',
+        mapId: this.currentMapId(),
+        floor: this.floorFromY(object.position.y),
+        zone: 'editor_light',
+        position: toPlainVector(object.position),
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1, uniform: 1 },
+        color: 0x75f6ff,
+        intensity: 0.8,
+        distance: 8,
+        brightness: 1,
+        modelBrightness: 1,
+        supportsTexture: false,
+        collision: { enabled: false, type: 'box', size: { x: 1, y: 1, z: 1 }, offset: { x: 0, y: 0, z: 0 } },
+        object3D: object
+      });
+    } else {
+      const isPuzzle = kind === 'puzzle';
+      const isMonster = kind === 'monster';
+      object = isPuzzle
+        ? new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.04, 8, 28), new THREE.MeshBasicMaterial({ color: 0x75f6ff }))
+        : new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.95, 5), new THREE.MeshBasicMaterial({ color: isMonster ? 0xff536f : 0x75f6ff }));
+      object.position.set(position.x, position.y + 0.5, position.z);
+      if (isPuzzle) object.rotation.x = Math.PI / 2;
+      placement = this.state.addPlacedModel({
+        id: nextId(isPuzzle ? 'puzzleStationMarker' : `${kind}SpawnMarker`, this.state.placedModels),
+        objectType: isPuzzle ? 'puzzleStationMarker' : 'spawnMarker',
+        spawnRole: isPuzzle ? null : kind,
+        mapId: this.currentMapId(),
+        floor: this.floorFromY(object.position.y),
+        zone: isPuzzle ? 'editor_puzzle_marker' : 'editor_spawn_marker',
+        position: toPlainVector(object.position),
+        rotation: toPlainVector(object.rotation),
+        scale: { x: 1, y: 1, z: 1, uniform: 1 },
+        brightness: 1,
+        modelBrightness: 1,
+        supportsTexture: false,
+        collision: { enabled: false, type: 'box', size: { x: 1, y: 1, z: 1 }, offset: { x: 0, y: 0, z: 0 } },
+        object3D: object
+      });
+    }
+    this.options.scene.add(object);
+    this.registerPlacement(placement, object, { type: placement.objectType, supportsTexture: false });
+    this.log(`Placed ${kind} marker.`);
     return placement;
   }
 
@@ -671,6 +1105,7 @@ class AssetEditor {
       floor: this.floorFromY(object.position.y)
     };
     this.state.updatePlacedModel(placement.id, patch);
+    this.updatePlacementCollision(placement, object);
     refreshSelectionHighlight();
     this.refreshObjects();
   }
@@ -686,26 +1121,39 @@ class AssetEditor {
     object.updateMatrixWorld(true);
   }
 
-  restoreDraftPlacement(placement, asset) {
-    if (!asset?.loadedScene) return false;
-    const object = this.cloneModelScene(asset.loadedScene);
+  restoreDraftPlacement(placement, asset = null) {
+    let object = null;
+    if (placement.objectType === 'shape') {
+      object = createShapeObject(placement.shapeId, THREE);
+    } else if (placement.objectType === 'image' || placement.objectType === 'gif') {
+      if (!asset?.textureObject) return false;
+      const texture = asset.textureObject.clone();
+      const aspect = asset.width && asset.height ? asset.width / asset.height : 1.4;
+      object = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(0.6, aspect), 1), new THREE.MeshStandardMaterial({ map: texture, color: 0xffffff, transparent: true, side: THREE.DoubleSide }));
+    } else {
+      if (!asset?.loadedScene) return false;
+      object = this.cloneModelScene(asset.loadedScene);
+    }
+    if (!object) return false;
     this.applyPlacementTransform(object, placement);
     this.options.scene.add(object);
     placement.object3D = object;
     placement.missingLocalFile = false;
     registerEditableObject({
       id: placement.id,
-      type: 'model',
-      category: 'placed-model',
+      type: placement.objectType || 'model',
+      category: placement.objectType === 'shape' ? 'placed-shape' : placement.objectType === 'image' || placement.objectType === 'gif' ? 'placed-image' : 'placed-model',
       mapId: placement.mapId || this.currentMapId(),
       floor: placement.floor || this.floorFromY(object.position.y),
       zone: placement.zone || 'editor_local',
       object3D: object,
-      supportsTexture: false,
+      supportsTexture: placement.supportsTexture !== false,
       supportsTransform: true,
       source: 'editor-import'
     });
+    if (placement.objectType === 'model') this.setupPlacementAnimation(placement, asset);
     this.applyModelBrightness(placement, placement.modelBrightness || placement.brightness || 1);
+    this.updatePlacementCollision(placement, object);
     return true;
   }
 
@@ -713,7 +1161,7 @@ class AssetEditor {
     const placement = this.selectedPlacement();
     const meta = getSelectedEditableObject();
     if (!placement || !meta?.object3D) {
-      this.log('Select a placed model first.');
+      this.log('Select a placed object first.');
       return null;
     }
     mutator(meta.object3D, placement);
@@ -796,27 +1244,42 @@ class AssetEditor {
 
   duplicateSelectedModel() {
     const placement = this.selectedPlacement();
-    const asset = placement ? this.state.models.find((item) => item.id === placement.modelAssetId) : null;
-    if (!placement || !asset) return this.log('Select a placed model to duplicate.');
-    this.selectedModelId = asset.id;
-    const duplicate = this.placeModelAtPoint(new THREE.Vector3(placement.position.x + 1, placement.position.y, placement.position.z));
-    if (!duplicate) return;
     const meta = getSelectedEditableObject();
-    meta.object3D.rotation.set(placement.rotation.x, placement.rotation.y, placement.rotation.z);
-    meta.object3D.scale.set(placement.scale.x, placement.scale.y, placement.scale.z);
-    this.applyModelBrightness(duplicate, placement.modelBrightness || placement.brightness || 1);
-    this.updatePlacementFromObject(duplicate, meta.object3D);
+    if (!placement || !meta?.object3D) return this.log('Select a placed object to duplicate.');
+    const object = meta.object3D.clone(true);
+    object.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      child.material = cloneMaterialValue(child.material);
+    });
+    object.position.set(placement.position.x + 1, placement.position.y, placement.position.z);
+    object.rotation.set(placement.rotation.x, placement.rotation.y, placement.rotation.z);
+    object.scale.set(placement.scale.x, placement.scale.y, placement.scale.z);
+    this.options.scene.add(object);
+    const duplicate = this.state.addPlacedModel({
+      ...placement,
+      id: nextId(`duplicate_${placement.objectType || 'object'}`, this.state.placedModels),
+      position: toPlainVector(object.position),
+      object3D: object
+    });
+    if (duplicate.objectType === 'model') {
+      const asset = this.state.models.find((item) => item.id === duplicate.modelAssetId);
+      this.setupPlacementAnimation(duplicate, asset);
+    }
+    this.registerPlacement(duplicate, object);
+    this.applyModelBrightness(duplicate, duplicate.modelBrightness || duplicate.brightness || 1);
     this.log(`Duplicated ${placement.id}`);
   }
 
   deleteSelectedModel() {
     const placement = this.selectedPlacement();
     const meta = getSelectedEditableObject();
-    if (!placement || !meta) return this.log('Select a placed model to delete.');
+    if (!placement || !meta) return this.log('Select a placed object to delete.');
     this.options.scene.remove(meta.object3D);
     unregisterEditableObject(placement.id);
+    this.animationMixers.delete(placement.id);
     this.state.removePlacedModel(placement.id);
     clearEditableSelection();
+    this.refreshCollisionHelpers();
     this.refreshObjects();
     this.log(`Deleted ${placement.id}`);
   }
@@ -830,7 +1293,10 @@ class AssetEditor {
     if (meta.supportsTransform) {
       const placement = this.state.modelPlacement(meta.id);
       this.ui.setSelectedInfo(meta, {
-        modelName: placement?.modelName,
+        modelName: placement?.modelName || placement?.shapeName || placement?.imageName || placement?.id,
+        objectType: placement?.objectType || 'model',
+        collision: placement?.collision,
+        animation: placement?.animation,
         brightness: placement?.modelBrightness || placement?.brightness || 1
       });
       this.ui.setModelControlValues(placement);
@@ -854,20 +1320,27 @@ class AssetEditor {
   loadDraft() {
     try {
       const runtimeTextures = new Map(this.state.textures.map((texture) => [texture.id, texture]));
+      const runtimeImages = new Map(this.state.images.map((image) => [image.id, image]));
       const runtimeModels = new Map(this.state.models.map((model) => [model.id, model]));
       this.state.placedModels.forEach((placement) => placement.object3D?.parent?.remove(placement.object3D));
       getEditableObjects().filter((meta) => meta.source === 'editor-import').forEach((meta) => unregisterEditableObject(meta.id));
+      this.animationMixers.clear();
       clearEditableSelection();
       const draft = this.state.loadDraft();
       if (!draft) return this.log('No local draft found.');
       this.state.textures = this.state.textures.map((texture) => ({ ...texture, ...runtimeTextures.get(texture.id) }));
+      this.state.images = this.state.images.map((image) => ({ ...image, ...runtimeImages.get(image.id) }));
       this.state.models = this.state.models.map((model) => ({ ...model, ...runtimeModels.get(model.id) }));
       this.state.placedModels.forEach((placement) => {
-        const asset = this.state.models.find((model) => model.id === placement.modelAssetId);
+        const asset = placement.objectType === 'image' || placement.objectType === 'gif'
+          ? this.state.images.find((image) => image.id === placement.imageAssetId)
+          : this.state.models.find((model) => model.id === placement.modelAssetId);
         if (!this.restoreDraftPlacement(placement, asset)) placement.missingLocalFile = true;
       });
       this.selectedTextureId = '';
+      this.selectedImageId = '';
       this.selectedModelId = '';
+      this.selectedShapeId = '';
       this.refreshObjects();
       this.ui.setLastSaved(this.state.lastSavedAt);
       this.log('Local draft metadata loaded. Re-upload files to restore previews.');
@@ -883,7 +1356,7 @@ class AssetEditor {
   }
 
   exportJson() {
-    const data = buildEditorExport({ mapId: this.currentMapId(), mapDisplayName: this.currentMapName(), state: this.state });
+    const data = buildEditorExport({ mapId: this.packageMapId(), mapDisplayName: this.currentMapName(), state: this.state });
     const text = stringifyEditorExport(data);
     this.ui.setJsonText(text);
     const fileName = downloadEditorJson(data);
@@ -893,7 +1366,7 @@ class AssetEditor {
   async exportCodexPackage() {
     try {
       const result = await buildCodexPackage({
-        mapId: this.currentMapId(),
+        mapId: this.packageMapId(),
         mapDisplayName: this.currentMapName(),
         state: this.state
       });
@@ -910,10 +1383,14 @@ class AssetEditor {
 
   updateStats() {
     this.ui.setTextures(this.state.textures, this.selectedTextureId);
+    this.ui.setImages?.(this.state.images, this.selectedImageId);
     this.ui.setModels(this.state.models, this.selectedModelId);
+    this.ui.setShapes?.(SHAPE_LIBRARY, SHAPE_CATEGORIES, this.selectedShapeId);
     this.ui.setPlacedModels(this.state.placedModels, getSelectedEditableObject()?.id);
     this.ui.setCounts({
       textures: this.state.textures.length,
+      images: this.state.images.length,
+      shapes: SHAPE_LIBRARY.length,
       models: this.state.models.length,
       placements: this.state.placedModels.length,
       surfaceEdits: this.state.surfaceEdits.length

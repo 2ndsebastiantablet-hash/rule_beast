@@ -6,9 +6,9 @@ import { PlayerController, FirstPersonCameraController } from './rosie/controls/
 import { AudioSystem } from './audio.js';
 import { GameUI } from './ui.js';
 import { initAssetEditor } from './editor/assetEditor.js';
-import { applyPermanentEditorOverrides, clearPermanentEditorOverrides } from './editor/editorOverrides.js';
+import { applyPermanentEditorOverrides, clearPermanentEditorOverrides, getPermanentEditorCollisionColliders, updatePermanentEditorOverrides } from './editor/editorOverrides.js';
 import { MONSTER_ABILITY_POOL, PUZZLE_TYPES, TUNING, LOBBY_STATES } from './data.js';
-import { DEFAULT_MAP_ID, MAP_OPTIONS } from './maps.js';
+import { DEFAULT_MAP_ID, MAP_OPTIONS, createBlankMapMakerLayout } from './maps.js';
 import {
   createMaterials,
   createWorld,
@@ -64,7 +64,8 @@ const timer = new THREE.Timer();
 const materials = createMaterials();
 const audio = new AudioSystem();
 const ui = new GameUI(audio);
-ui.setMapOptions(MAP_OPTIONS, DEFAULT_MAP_ID);
+let availableMapOptions = [...MAP_OPTIONS];
+ui.setMapOptions(availableMapOptions, DEFAULT_MAP_ID);
 const db = init({ appId: INSTANT_DB_APP_ID });
 
 const myId = `player_${Math.random().toString(36).slice(2, 8)}`;
@@ -91,6 +92,8 @@ let game = null;
 let selectedMapId = DEFAULT_MAP_ID;
 let world = null;
 let currentLayout = null;
+let mapMakerMode = false;
+let mapMakerSession = null;
 let puzzles = [];
 let colliders = [];
 let interactables = { doors: [], roomLabels: [], stairs: [] };
@@ -182,11 +185,16 @@ assetEditor = initAssetEditor({
   renderer,
   adminCode: EDITOR_ADMIN_CODE,
   getCurrentMapId: () => selectedMapId,
-  getCurrentMapName: () => MAP_OPTIONS.find((map) => map.id === selectedMapId)?.name || selectedMapId,
+  getCurrentMapName: () => mapMakerSession?.displayName || availableMapOptions.find((map) => map.id === selectedMapId)?.name || selectedMapId,
   getCurrentMapLayout: () => currentLayout,
   getPlayerPosition: () => playerModel.position.clone(),
-  onEditorModeChange: setEditorBrightnessBoost
+  onEditorModeChange: handleEditorModeChange
 });
+
+function handleEditorModeChange(enabled) {
+  setEditorBrightnessBoost(enabled);
+  if (!enabled && mapMakerMode) exitMapMaker();
+}
 
 function isInteractKey(event) {
   return event.code === INTERACT_KEY || event.key?.toLowerCase() === 'e';
@@ -247,7 +255,7 @@ function lobbyConditionText() {
 }
 
 function validMapId(mapId) {
-  return MAP_OPTIONS.some((map) => map.id === mapId) ? mapId : DEFAULT_MAP_ID;
+  return availableMapOptions.some((map) => map.id === mapId) ? mapId : DEFAULT_MAP_ID;
 }
 
 function setSelectedMap(mapId, publish = true) {
@@ -259,7 +267,7 @@ function setSelectedMap(mapId, publish = true) {
 }
 
 function isAnyMenuOpen() {
-  return !ui.mainMenu.classList.contains('hidden') || !ui.lobby.classList.contains('hidden') || !ui.roundMenu.classList.contains('hidden') || !ui.serverMenu.classList.contains('hidden') || !ui.end.classList.contains('hidden');
+  return !ui.mainMenu.classList.contains('hidden') || !ui.mapMakerSetup.classList.contains('hidden') || !ui.lobby.classList.contains('hidden') || !ui.roundMenu.classList.contains('hidden') || !ui.serverMenu.classList.contains('hidden') || !ui.end.classList.contains('hidden');
 }
 
 function makeTextTexture(text, width = 1024, height = 160, options = {}) {
@@ -703,6 +711,18 @@ ui.onJoinPrivate = (code) => {
     if (lobby && connectedPlayers().length <= 1 && !isHost()) ui.setMenuMessage('Lobby not found.');
   }, 1600);
 };
+ui.onOpenMapMaker = () => ui.showMapMakerSetup(availableMapOptions, selectedMapId);
+ui.onCancelMapMaker = () => ui.showMain('Map Maker cancelled.');
+ui.onCreateNewMap = ({ mapId, displayName }) => {
+  const safeMapId = String(mapId || 'my_custom_map').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_') || 'my_custom_map';
+  const safeName = String(displayName || safeMapId).trim() || safeMapId;
+  enterMapMaker({ packageType: 'newMap', mapId: safeMapId, displayName: safeName });
+};
+ui.onEditExistingMap = (mapId) => {
+  const safeMapId = validMapId(mapId || selectedMapId);
+  const displayName = availableMapOptions.find((map) => map.id === safeMapId)?.name || safeMapId;
+  enterMapMaker({ packageType: 'updateExistingMap', mapId: safeMapId, displayName });
+};
 ui.onStartNextRound = () => {
   if (!isHost() || !game?.waitingBetweenRounds) return;
   startNextRoundFromIntermission();
@@ -784,11 +804,11 @@ function toggleServerMenu() {
   else closeServerMenu();
 }
 
-function rebuildMap(seed, mapId = selectedMapId) {
+function rebuildMap(seed, mapId = selectedMapId, layoutOverride = null) {
   clearPermanentEditorOverrides(scene);
   clearWorld(world);
   clearPuzzles(puzzles);
-  const layout = generateMapLayout(seed, mapId);
+  const layout = layoutOverride || generateMapLayout(seed, mapId);
   selectedMapId = layout.id || validMapId(mapId);
   currentLayout = layout;
   applyMapLighting(layout);
@@ -801,6 +821,67 @@ function rebuildMap(seed, mapId = selectedMapId) {
     .then(() => assetEditor?.refreshObjects?.())
     .catch((error) => console.warn('[Rule Beast] editor override load failed:', error.message));
   return layout;
+}
+
+function ensureAvailableMapOption(mapId, name) {
+  if (!availableMapOptions.some((map) => map.id === mapId)) {
+    availableMapOptions = [...availableMapOptions, { id: mapId, name }];
+    ui.setMapOptions(availableMapOptions, mapId);
+  }
+}
+
+async function loadEditorMapIndex() {
+  try {
+    const response = await fetch('assets/editor_maps/index.json');
+    if (response.status === 404) return;
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const maps = Array.isArray(data.maps) ? data.maps : [];
+    const next = [...availableMapOptions];
+    maps.forEach((map) => {
+      if (map?.id && !next.some((item) => item.id === map.id)) next.push({ id: map.id, name: map.name || map.id });
+    });
+    availableMapOptions = next;
+    ui.setMapOptions(availableMapOptions, selectedMapId);
+  } catch (error) {
+    console.warn('[Rule Beast] editor map index skipped:', error.message);
+  }
+}
+
+function enterMapMaker({ packageType, mapId, displayName }) {
+  mapMakerMode = true;
+  mapMakerSession = { packageType, mapId, displayName };
+  game = null;
+  lobby = null;
+  selectedMapId = mapId;
+  if (packageType === 'updateExistingMap') ensureAvailableMapOption(mapId, displayName);
+  const seed = Date.now() % 1000000;
+  const layout = packageType === 'newMap'
+    ? createBlankMapMakerLayout(seed, mapId, displayName)
+    : generateMapLayout(seed, mapId);
+  rebuildMap(seed, mapId, layout);
+  const spawn = layout.survivorSpawn || { x: 0, y: 0, z: 4 };
+  playerModel.position.set(spawn.x || 0, spawn.y || 0, spawn.z || 4);
+  playerModel.visible = true;
+  setControllerGroundLevel(spawn.y || 0);
+  controller.setEnabled(false);
+  fpCamera.eyeHeight = 1.55;
+  fpCamera.enable();
+  ui.showMapMakerWorkspace(displayName);
+  assetEditor?.startMapMakerSession?.({ packageType, mapId, displayName });
+  refreshVRMenu();
+}
+
+function exitMapMaker() {
+  mapMakerMode = false;
+  mapMakerSession = null;
+  fpCamera.disable();
+  controller.setEnabled(false);
+  selectedMapId = DEFAULT_MAP_ID;
+  rebuildMap(12345, DEFAULT_MAP_ID);
+  ui.setMapOptions(availableMapOptions, selectedMapId);
+  ui.showMain('Map Maker closed. Export a Codex Package when you are ready to make changes permanent.');
+  refreshVRMenu();
 }
 
 function placeLocalPlayerAtSpawn(layout) {
@@ -1396,8 +1477,13 @@ function resolveWalls(object) {
   const radius = TUNING.playerRadius;
   pos.x = THREE.MathUtils.clamp(pos.x, -24.2, 24.2);
   pos.z = THREE.MathUtils.clamp(pos.z, -20.2, 20.2);
-  for (const wall of colliders) {
-    if (Math.abs((pos.y || 0) - (wall.y || 0)) > 1.8) continue;
+  const editorColliders = getEditorCollisionColliders();
+  for (const wall of [...colliders, ...editorColliders]) {
+    if (wall.minY !== undefined && wall.maxY !== undefined) {
+      const playerMinY = pos.y || 0;
+      const playerMaxY = playerMinY + 1.8;
+      if (playerMaxY < wall.minY || playerMinY > wall.maxY) continue;
+    } else if (Math.abs((pos.y || 0) - (wall.y || 0)) > 1.8) continue;
     const closestX = THREE.MathUtils.clamp(pos.x, wall.minX, wall.maxX);
     const closestZ = THREE.MathUtils.clamp(pos.z, wall.minZ, wall.maxZ);
     const dx = pos.x - closestX;
@@ -1408,6 +1494,13 @@ function resolveWalls(object) {
       pos.z += (dz / dist) * (radius - dist);
     }
   }
+}
+
+function getEditorCollisionColliders() {
+  return [
+    ...(assetEditor?.collisionColliders?.() || []),
+    ...(getPermanentEditorCollisionColliders?.() || [])
+  ];
 }
 
 function isEditorModeActive() {
@@ -1615,6 +1708,12 @@ function animate(time) {
   updateLocalHandVisibility();
   updateVRMenuEnvironment();
   updateVRInput(delta);
+  if (mapMakerMode && assetEditor?.isEditorModeActive?.() && !isAnyMenuOpen()) {
+    updateEditorFlyMovement(delta);
+    fpCamera.update();
+  }
+  assetEditor?.update?.(delta);
+  updatePermanentEditorOverrides(delta);
   updateLocal(delta);
   updateEffects(delta);
   updateHud(delta);
@@ -1622,5 +1721,6 @@ function animate(time) {
 }
 
 rebuildMap(12345, DEFAULT_MAP_ID);
+loadEditorMapIndex();
 refreshPublicLobbies();
 renderer.setAnimationLoop(animate);

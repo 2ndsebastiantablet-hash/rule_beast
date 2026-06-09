@@ -9,6 +9,10 @@ export class GameUI {
     this.onJoinPrivate = null;
     this.onStartGame = null;
     this.onEnterVR = null;
+    this.onOpenMapMaker = null;
+    this.onCreateNewMap = null;
+    this.onEditExistingMap = null;
+    this.onCancelMapMaker = null;
     this.onStartNextRound = null;
     this.onLeaveLobby = null;
     this.onCloseServerMenu = null;
@@ -28,11 +32,29 @@ export class GameUI {
         <div class="menu-actions two-up">
           <button id="create-public">Create Public Lobby</button>
           <button id="create-private">Create Private Lobby</button>
+          <button id="open-map-maker">Map Maker</button>
           <button id="enter-vr">Enter VR</button>
         </div>
         <div class="browser-head"><h3>Public Servers</h3><button id="refresh-public">Refresh</button></div>
         <div id="public-list" class="public-list"><div class="empty-row">No public lobbies loaded.</div></div>
         <p id="menu-message" class="hint">Type a name, join by private code, or create a public/private lobby.</p>
+      </section>
+      <section id="map-maker-setup" class="panel lobby hidden">
+        <div class="eyebrow">LOCAL ONLY MAP MAKER</div>
+        <h2>Map Maker</h2>
+        <p>Create a new blank workspace or edit an existing map with the in-game editor. Nothing is uploaded or synced.</p>
+        <div class="settings-card">Create New Map</div>
+        <div class="menu-fields compact-fields">
+          <label>Map ID <input id="map-maker-new-id" maxlength="40" placeholder="my_custom_map" autocomplete="off"></label>
+          <label>Display Name <input id="map-maker-new-name" maxlength="48" placeholder="My Custom Map" autocomplete="off"></label>
+        </div>
+        <div class="actions compact"><button id="map-maker-create-new">Create New Map</button></div>
+        <div class="settings-card">Edit Existing Map</div>
+        <label class="map-picker">Map <select id="map-maker-existing-select"></select></label>
+        <div class="actions compact">
+          <button id="map-maker-edit-existing">Edit Existing Map</button>
+          <button id="map-maker-cancel">Cancel</button>
+        </div>
       </section>
       <section id="lobby" class="panel lobby hidden">
         <div class="eyebrow" id="lobby-state">Waiting For Players</div>
@@ -95,6 +117,7 @@ export class GameUI {
       </section>`;
 
     this.mainMenu = this.root.querySelector('#main-menu');
+    this.mapMakerSetup = this.root.querySelector('#map-maker-setup');
     this.lobby = this.root.querySelector('#lobby');
     this.hud = this.root.querySelector('#hud');
     this.roundMenu = this.root.querySelector('#round-menu');
@@ -107,11 +130,13 @@ export class GameUI {
     this.publicList = this.root.querySelector('#public-list');
     this.progressMeter = this.root.querySelector('.meter');
     this.mapSelects = [this.root.querySelector('#lobby-map-select'), this.root.querySelector('#round-map-select')];
+    this.mapMakerSelect = this.root.querySelector('#map-maker-existing-select');
 
     this.root.querySelector('#player-name').value = localStorage.getItem('ruleBeastName') || '';
     this.root.querySelector('#refresh-public').addEventListener('click', () => this.onRefreshPublic?.());
     this.root.querySelector('#create-public').addEventListener('click', async () => { await this.audio.unlock(); this.onCreatePublic?.(); });
     this.root.querySelector('#create-private').addEventListener('click', async () => { await this.audio.unlock(); this.onCreatePrivate?.(); });
+    this.root.querySelector('#open-map-maker').addEventListener('click', async () => { await this.audio.unlock(); this.onOpenMapMaker?.(); });
     this.root.querySelector('#join-private').addEventListener('click', async () => { await this.audio.unlock(); this.onJoinPrivate?.(this.privateCode()); });
     this.root.querySelector('#enter-vr').addEventListener('click', async () => { await this.audio.unlock(); this.onEnterVR?.(); });
     this.root.querySelector('#start-game').addEventListener('click', () => this.onStartGame?.());
@@ -122,6 +147,12 @@ export class GameUI {
     this.root.querySelector('#close-server-menu').addEventListener('click', () => this.onCloseServerMenu?.());
     this.root.querySelector('#server-leave').addEventListener('click', () => this.onLeaveLobby?.());
     this.root.querySelector('#back-menu').addEventListener('click', () => this.showMain('Match ended. Create or join another lobby for a new generated map.'));
+    this.root.querySelector('#map-maker-create-new').addEventListener('click', () => this.onCreateNewMap?.({
+      mapId: this.root.querySelector('#map-maker-new-id').value,
+      displayName: this.root.querySelector('#map-maker-new-name').value
+    }));
+    this.root.querySelector('#map-maker-edit-existing').addEventListener('click', () => this.onEditExistingMap?.(this.mapMakerSelect.value));
+    this.root.querySelector('#map-maker-cancel').addEventListener('click', () => this.onCancelMapMaker?.());
     this.mapSelects.forEach((select) => {
       select.addEventListener('change', () => this.onMapSelected?.(select.value));
     });
@@ -144,6 +175,10 @@ export class GameUI {
       select.innerHTML = options.map((map) => `<option value="${map.id}">${map.name}</option>`).join('');
       select.value = selectedId;
     });
+    if (this.mapMakerSelect) {
+      this.mapMakerSelect.innerHTML = options.map((map) => `<option value="${map.id}">${map.name}</option>`).join('');
+      this.mapMakerSelect.value = selectedId;
+    }
   }
 
   setMapSelection(selectedId, isHost) {
@@ -182,6 +217,7 @@ export class GameUI {
 
   showMain(message = '') {
     this.mainMenu.classList.remove('hidden');
+    this.mapMakerSetup.classList.add('hidden');
     this.lobby.classList.add('hidden');
     this.hud.classList.add('hidden');
     this.roundMenu.classList.add('hidden');
@@ -190,8 +226,31 @@ export class GameUI {
     if (message) this.setMenuMessage(message);
   }
 
+  showMapMakerSetup(options, selectedId) {
+    this.setMapOptions(options, selectedId);
+    this.mainMenu.classList.add('hidden');
+    this.mapMakerSetup.classList.remove('hidden');
+    this.lobby.classList.add('hidden');
+    this.hud.classList.add('hidden');
+    this.roundMenu.classList.add('hidden');
+    this.serverMenu.classList.add('hidden');
+    this.end.classList.add('hidden');
+  }
+
+  showMapMakerWorkspace(name = 'Map Maker') {
+    this.mainMenu.classList.add('hidden');
+    this.mapMakerSetup.classList.add('hidden');
+    this.lobby.classList.add('hidden');
+    this.hud.classList.add('hidden');
+    this.roundMenu.classList.add('hidden');
+    this.serverMenu.classList.add('hidden');
+    this.end.classList.add('hidden');
+    this.flash(`${name} opened in Map Maker.`);
+  }
+
   setLobby(state) {
     this.mainMenu.classList.add('hidden');
+    this.mapMakerSetup.classList.add('hidden');
     this.lobby.classList.remove('hidden');
     this.hud.classList.add('hidden');
     this.roundMenu.classList.add('hidden');
@@ -221,6 +280,7 @@ export class GameUI {
 
   showGame() {
     this.mainMenu.classList.add('hidden');
+    this.mapMakerSetup.classList.add('hidden');
     this.lobby.classList.add('hidden');
     this.roundMenu.classList.add('hidden');
     this.serverMenu.classList.add('hidden');
@@ -230,6 +290,7 @@ export class GameUI {
 
   showRoundMenu(state) {
     this.mainMenu.classList.add('hidden');
+    this.mapMakerSetup.classList.add('hidden');
     this.lobby.classList.add('hidden');
     this.hud.classList.add('hidden');
     this.serverMenu.classList.add('hidden');
@@ -253,6 +314,7 @@ export class GameUI {
 
   showServerMenu(state) {
     this.mainMenu.classList.add('hidden');
+    this.mapMakerSetup.classList.add('hidden');
     this.lobby.classList.add('hidden');
     this.roundMenu.classList.add('hidden');
     this.end.classList.add('hidden');
@@ -285,6 +347,7 @@ export class GameUI {
 
   endMatch(winner, copy) {
     this.mainMenu.classList.add('hidden');
+    this.mapMakerSetup.classList.add('hidden');
     this.lobby.classList.add('hidden');
     this.hud.classList.add('hidden');
     this.end.classList.remove('hidden');
