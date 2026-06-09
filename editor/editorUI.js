@@ -221,6 +221,7 @@ export class EditorUI {
           <div class="editor-status">EDITOR MODE - LOCAL TESTING ONLY</div>
           <div class="editor-note">Local-only editor. Changes are not permanent yet.</div>
           <div class="editor-note" id="editor-map-summary">Map: none</div>
+          <div class="editor-note" id="editor-status-line">Editor Mode: OFF / Fly Mode: OFF / Collision: ON / Tool: Select / Selected: none</div>
           <div class="editor-actions"><button id="editor-close">Close Editor</button></div>
         </header>
 
@@ -232,6 +233,7 @@ export class EditorUI {
             <button data-tool-mode="place">Place Model Mode</button>
             <button data-tool-mode="edit">Move/Edit Object</button>
           </div>
+          <div class="editor-actions"><button id="editor-toggle-collision">Collision ON/OFF</button></div>
           <div class="editor-help" id="editor-tool-help">Click a surface or placed model to select it.</div>
         </section>
 
@@ -274,6 +276,7 @@ export class EditorUI {
           <h3>Model Edit Controls</h3>
           <div class="editor-input-grid">
             <label>Move Step <input id="editor-move-step" type="number" min="0.1" step="0.1" value="0.5"></label>
+            <label>Vertical Step <input id="editor-vertical-step" type="number" min="0.1" step="0.1" value="0.5"></label>
             <label>Scale Step <input id="editor-scale-step" type="number" min="0.05" step="0.05" value="0.1"></label>
             <label>Rotate Step <input id="editor-rotate-step" type="number" min="1" step="1" value="15"></label>
             <label>Rotation <input id="editor-rotation-y" type="range" min="-180" max="180" step="1" value="0"></label>
@@ -316,6 +319,7 @@ export class EditorUI {
             <button id="editor-load-draft">Load Local Draft</button>
             <button id="editor-clear-draft" class="danger">Clear Local Draft</button>
             <button id="editor-export-json">Export Editor JSON</button>
+            <button id="editor-export-codex-package">Export Codex Package</button>
           </div>
           <textarea id="editor-json-text" class="editor-json" placeholder="Export Editor JSON appears here"></textarea>
         </section>
@@ -323,9 +327,16 @@ export class EditorUI {
         <section class="editor-section">
           <h3>Help</h3>
           <div class="editor-help">
+            Status labels show Editor Mode: ON, Fly Mode: ON, Collision ON/OFF, current tool, and selected object/model id.
             Upload a texture, then drag it onto a wall/floor or select texture and click surface in Paint Texture Mode.
             Upload a GLB, then drag it into the map or select model and click placement location.
             Click placed models to resize/move them.
+            Editor Fly Controls: W/A/S/D = fly around, Space = fly up, Shift/Ctrl = fly down, C = toggle collision.
+            Selected Model Controls: Select a model, then use Q/E to scale, WASD to move, Arrow Up/Down to change height, Arrow Left/Right to rotate.
+            Export Editor JSON = quick metadata export. Export Codex Package = full package for Codex with manifest + assets.
+            To make permanent: put ZIP in editor_imports/inbox and ask Codex to import it.
+            Local edits are not permanent until imported into the repo. Blob URLs are temporary.
+            If package export says files are missing, re-upload the missing files and export again.
           </div>
         </section>
 
@@ -346,6 +357,7 @@ export class EditorUI {
     const q = (selector) => this.root.querySelector(selector);
     q('#editor-unlock-button').addEventListener('click', () => this.callbacks.unlock?.(q('#editor-admin-code').value));
     q('#editor-close').addEventListener('click', () => this.callbacks.close?.());
+    q('#editor-toggle-collision').addEventListener('click', () => this.callbacks.toggleCollision?.());
     q('#editor-texture-file').addEventListener('change', (event) => this.callbacks.importTexture?.(event.target.files?.[0]));
     q('#editor-model-file').addEventListener('change', (event) => this.callbacks.importModel?.(event.target.files?.[0]));
     q('#editor-brightness').addEventListener('input', (event) => this.callbacks.changeBrightness?.(Number(event.target.value)));
@@ -359,6 +371,7 @@ export class EditorUI {
     q('#editor-load-draft').addEventListener('click', () => this.callbacks.loadDraft?.());
     q('#editor-clear-draft').addEventListener('click', () => this.callbacks.clearDraft?.());
     q('#editor-export-json').addEventListener('click', () => this.callbacks.exportJson?.());
+    q('#editor-export-codex-package').addEventListener('click', () => this.callbacks.exportCodexPackage?.());
     q('#editor-rotation-y').addEventListener('input', (event) => this.callbacks.setModelRotation?.(Number(event.target.value)));
     q('#editor-uniform-scale').addEventListener('input', (event) => this.callbacks.setModelScale?.('uniform', Number(event.target.value)));
     q('#editor-height-scale').addEventListener('input', (event) => this.callbacks.setModelScale?.('height', Number(event.target.value)));
@@ -421,6 +434,10 @@ export class EditorUI {
     this.root.querySelector('#editor-map-summary').textContent = text;
   }
 
+  setStatus({ editorActive, flyActive, collisionEnabled, toolMode, selectedId }) {
+    this.root.querySelector('#editor-status-line').textContent = `Editor Mode: ${editorActive ? 'ON' : 'OFF'} / Fly Mode: ${flyActive ? 'ON' : 'OFF'} / Collision: ${collisionEnabled ? 'ON' : 'OFF'} / Tool: ${toolLabel[toolMode] || toolMode} / Selected: ${selectedId || 'none'}`;
+  }
+
   setTextures(textures, selectedId) {
     const list = this.root.querySelector('#editor-texture-list');
     list.innerHTML = textures.length ? textures.map((texture) => `
@@ -477,6 +494,7 @@ export class EditorUI {
   controlSteps() {
     return {
       move: Number(this.root.querySelector('#editor-move-step').value) || 0.5,
+      verticalMove: Number(this.root.querySelector('#editor-vertical-step').value) || 0.5,
       rotate: (Number(this.root.querySelector('#editor-rotate-step').value) || 15) * Math.PI / 180,
       scale: Number(this.root.querySelector('#editor-scale-step').value) || 0.1
     };

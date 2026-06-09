@@ -8,7 +8,11 @@ const assetEditor = readFileSync(new URL('../editor/assetEditor.js', import.meta
 const editorRegistry = readFileSync(new URL('../editor/editorRegistry.js', import.meta.url), 'utf8');
 const editorState = readFileSync(new URL('../editor/editorState.js', import.meta.url), 'utf8');
 const editorExport = readFileSync(new URL('../editor/editorExport.js', import.meta.url), 'utf8');
+const editorPackage = readFileSync(new URL('../editor/editorPackage.js', import.meta.url), 'utf8');
+const editorOverrides = readFileSync(new URL('../editor/editorOverrides.js', import.meta.url), 'utf8');
 const editorUI = readFileSync(new URL('../editor/editorUI.js', import.meta.url), 'utf8');
+const importerScript = readFileSync(new URL('../tools/import-editor-package.mjs', import.meta.url), 'utf8');
+const gitignore = readFileSync(new URL('../.gitignore', import.meta.url), 'utf8');
 const {
   DEFAULT_MAP_ID,
   MAP_OPTIONS,
@@ -113,10 +117,18 @@ assert.ok(bunker.lighting && amusement.lighting && hotel.lighting, 'all maps sho
 assert.ok(editorRegistry.includes('registerEditableObject') && editorRegistry.includes('selectEditableObject') && editorRegistry.includes('THREE.BoxHelper'), 'editor registry should expose selectable object helpers and highlighting');
 assert.ok(editorState.includes('EDITOR_DRAFT_STORAGE_KEY') && editorState.includes('surfaceBrightness') && editorState.includes('modelBrightness') && !editorState.includes('base64'), 'editor state should save metadata-only drafts with brightness data');
 assert.ok(editorExport.includes('buildEditorExport') && editorExport.includes('Local files are temporary') && editorExport.includes('downloadEditorJson'), 'editor export should be simple local editor JSON');
+assert.ok(index.includes('"fflate"'), 'index import map should expose a lightweight browser ZIP dependency');
 assert.ok(assetEditor.includes('GLTFLoader') && assetEditor.includes('URL.createObjectURL') && assetEditor.includes('visualOnly'), 'asset editor should support local GLB imports as visual-only placements');
 assert.ok(assetEditor.includes('toolMode') && assetEditor.includes('paintTextureOnSurface') && assetEditor.includes('placeModelAtPoint'), 'asset editor should provide simple paint/place click modes');
 assert.ok(assetEditor.includes('applyBrightnessToMaterial') && assetEditor.includes('applyModelBrightness') && assetEditor.includes('applySurfaceBrightness'), 'asset editor should provide surface and model brightness controls');
-['Rule Beast Asset Editor', 'EDITOR MODE - LOCAL TESTING ONLY', 'My Textures', 'My Models', 'Placed Objects', 'Paint Texture Mode', 'Place Model Mode', 'Move Left', 'Move Right', 'Bigger', 'Smaller', 'Taller', 'Wider', 'Export Editor JSON'].forEach((text) => {
+assert.ok(assetEditor.includes('handleEditorKeyboard') && assetEditor.includes('toggleEditorCollision') && assetEditor.includes('editorCollisionEnabled') && assetEditor.includes('isTypingInInput'), 'asset editor should handle keyboard editing, fly mode, and collision state');
+assert.ok(main.includes('isEditorModeActive') && main.includes('updateEditorFlyMovement') && main.includes('assetEditor?.handleEditorKeyboard') && main.includes('assetEditor?.shouldUseEditorMovement'), 'main should route editor keyboard/fly movement before normal gameplay controls');
+assert.ok(main.includes('applyPermanentEditorOverrides') && main.includes('clearPermanentEditorOverrides'), 'main should load and clear permanent editor map overrides');
+assert.ok(editorPackage.includes('zipSync') && editorPackage.includes('buildCodexPackage') && editorPackage.includes('codex_import_prompt.txt') && editorPackage.includes('manifest.json') && editorPackage.includes('manifest.assets'), 'editor package export should create a real ZIP with manifest, assets, and prompt');
+assert.ok(editorOverrides.includes('loadPermanentEditorOverrides') && editorOverrides.includes('assets/editor_maps') && editorOverrides.includes('latest.json') && editorOverrides.includes('registerEditableObject') && editorOverrides.includes('data.assets?.textures') && editorOverrides.includes('placement.modelId'), 'permanent override loader should fetch static latest.json and register visual-only models');
+assert.ok(importerScript.includes('import-editor-package') && importerScript.includes('assets/editor_maps') && importerScript.includes('latest.json') && importerScript.includes('inflateRawSync') && importerScript.includes('manifest.json') && importerScript.includes('manifest.assets?.textures'), 'importer script should unpack editor ZIPs and write permanent latest.json');
+assert.ok(gitignore.includes('editor_imports/inbox/*.zip') && gitignore.includes('!editor_imports/inbox/.gitkeep'), 'gitignore should keep the inbox folder but ignore package ZIPs');
+['Rule Beast Asset Editor', 'EDITOR MODE - LOCAL TESTING ONLY', 'Editor Mode: ON', 'Fly Mode: ON', 'Collision', 'Editor Fly Controls', 'Selected Model Controls', 'Export Editor JSON', 'Export Codex Package'].forEach((text) => {
   assert.ok(editorUI.includes(text), `editor UI should include ${text}`);
 });
-assert.ok(!`${assetEditor}\n${editorRegistry}\n${editorState}\n${editorExport}\n${editorUI}`.match(/Cloudflare|R2|GitHub API|publishPresence|publishTopic|Manifest|manifest/), 'editor modules must stay local-only and avoid manifest/cloud publishing architecture');
+assert.ok(!`${assetEditor}\n${editorRegistry}\n${editorState}\n${editorExport}\n${editorPackage}\n${editorOverrides}\n${editorUI}`.match(/Cloudflare|R2|GitHub API|publishPresence|publishTopic/), 'editor modules must stay local-only and avoid cloud or multiplayer publishing');

@@ -92,31 +92,92 @@ GLB workflow:
 - Use the PowerPoint-style controls to move left/right/forward/back/up/down, rotate left/right, make bigger/smaller, taller/shorter, wider/narrower, deeper/thinner, duplicate, delete, reset rotation, or reset transform.
 - The selected model has a brightness slider from 0.25 to 2.5 and updates immediately.
 
+Editor Fly Mode:
+
+- When Editor Mode is open and no placed model is selected, `W/A/S/D` flies around the map.
+- `Space` flies up.
+- `Shift` or `Ctrl` flies down.
+- `C` toggles editor collision.
+- Collision ON keeps the editor camera/player using normal wall collision.
+- Collision OFF lets the editor camera/player pass through walls, floors, ceilings, objects, and map boundaries.
+- Closing the editor clears editor movement keys, restores collision ON, and returns normal gameplay controls.
+
+Keyboard Model Editing:
+
+- Click a placed model to select it.
+- `Q` makes the selected model bigger.
+- `E` makes the selected model smaller.
+- `W/A/S/D` moves the selected model forward/left/back/right.
+- `Arrow Up` and `Arrow Down` move the selected model up/down.
+- `Arrow Left` and `Arrow Right` rotate the selected model.
+- `Delete` or `Backspace` deletes the selected model.
+- `Esc` clears the selection.
+- While a model is selected, those keys edit the model and do not trigger normal movement, puzzle, attack, or monster ability controls.
+
 Local drafts:
 
 - Save Local Draft stores metadata in `localStorage` under `ruleBeastEditorDraftV1`.
 - Drafts do not store binary texture/model files or base64 data.
 - Loading a draft may show missing-file warnings because browser blob URLs are temporary and may not survive reloads.
+- If the same browser session still has the uploaded files, loading a draft restores placed model transforms and brightness.
 
 Export Editor JSON:
 
 - Export Editor JSON downloads a readable JSON file and fills the export textarea.
 - The JSON includes map id/name, uploaded texture/model metadata, changed surfaces, brightness settings, placed model transforms, warnings, and a note that local blob URLs are temporary.
-- To make editor work permanent later, copy texture files into `assets/textures/`, copy GLB files into `assets/models/`, replace temporary blob URLs with repo asset paths, and give the exported JSON plus files to Codex for source integration.
 
-Current limitations: local-only, not multiplayer synced, not permanent until source integration, imported models are visual-only, no cloud publishing, and large assets can hurt browser or VR performance.
+Export Codex Package:
+
+- Export Codex Package downloads a real ZIP using the lightweight browser `fflate` dependency loaded from the import map.
+- The ZIP contains `manifest.json`, `textures/`, `models/`, and `codex_import_prompt.txt`.
+- The ZIP includes the uploaded texture/model files only while those original browser `File` objects are still available in the current session.
+- If package export warns that local files are missing, re-upload the missing texture/model files and export again.
+
+Making Editor Changes Permanent:
+
+- Edit the map in Editor Mode.
+- Click Export Codex Package.
+- Move the ZIP into `editor_imports/inbox/`.
+- Open Codex in the Rule Beast repo.
+- Tell Codex: `Import the latest editor package from editor_imports/inbox and make it permanent.`
+- Codex runs `node tools/import-editor-package.mjs editor_imports/inbox/<package>.zip`.
+- The importer copies assets to `assets/editor_maps/<mapId>/textures/` and `assets/editor_maps/<mapId>/models/`.
+- The importer writes `assets/editor_maps/<mapId>/latest.json`.
+- The game loads `assets/editor_maps/<mapId>/latest.json` after the built-in map is created.
+- Codex commits and pushes. Players refresh/reload to see the permanent map update.
+
+Permanent Override System:
+
+- Built-in maps remain in `maps.js`.
+- Permanent editor overrides live in `assets/editor_maps/<mapId>/latest.json`.
+- Missing `latest.json` is fine; the game continues with the built-in map.
+- If `latest.json` or an asset fails to load, the loader logs a warning, skips that item, and keeps the map playable.
+- Overrides can apply surface textures, surface brightness, visual-only placed GLB models, model transforms, and model brightness.
+
+Editor Imports Folder:
+
+- Put future packages in `editor_imports/inbox/`.
+- `editor_imports/inbox/*.zip` is gitignored so large temporary packages do not get committed by accident.
+- `editor_imports/inbox/.gitkeep` keeps the folder convention in the repo.
+
+Current limitations: local-only testing is not multiplayer synced, imported models are visual-only, there is no cloud publishing, there is no GitHub upload from inside the game, exported packages must be imported by Codex, and large assets can hurt browser or VR performance.
 
 ## Main Files
 
-- `index.html`: page shell, import map, CSS, containers, and script loading.
-- `main.js`: Three.js renderer/bootstrap, WebXR setup, brighter global/map lighting, local admin editor initialization, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
+- `index.html`: page shell, import map, `fflate` browser ZIP dependency, CSS, containers, and script loading.
+- `main.js`: Three.js renderer/bootstrap, WebXR setup, brighter global/map lighting, local admin editor initialization, editor fly/collision routing, permanent override loading, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
 - `entities.js`: materials, map loading, editable surface registration, multi-floor world geometry, rooms, corridors, walls, doors, stairwell markers, boosted map lights, props, player/monster models, local hands, puzzle station meshes, remote markers, corpses, and distance helpers.
 - `maps.js`: map IDs/options, `default_bunker_lab`, `amusement_park`, and `hotel` definitions, map lighting profiles, wall snapping/overlap helpers, map factory, floor heights, room/path sizes, grass sections, wall colliders, stair connections, doors, spawn points, puzzle station zones, and light positions.
-- `editor/assetEditor.js`: local-only editor coordinator for admin unlock, texture imports, GLB imports, click/drag paint and place modes, brightness, model transforms, canvas selection, draft actions, and export actions.
+- `editor/assetEditor.js`: local-only editor coordinator for admin unlock, texture imports, GLB imports, click/drag paint and place modes, editor fly/collision state, keyboard model editing, brightness, model transforms, canvas selection, draft actions, and export actions.
 - `editor/editorRegistry.js`: editable object registry, selection helpers, and BoxHelper highlighting.
 - `editor/editorState.js`: editor runtime state and metadata-only local draft save/load.
 - `editor/editorUI.js`: DOM editor unlock box, scrollable editor panel, upload lists, mode buttons, placed object list, and simple model controls.
 - `editor/editorExport.js`: simple Export Editor JSON builder and download helper.
+- `editor/editorPackage.js`: Export Codex Package ZIP builder and `codex_import_prompt.txt` generator.
+- `editor/editorOverrides.js`: permanent static editor override loader for `assets/editor_maps/<mapId>/latest.json`.
+- `tools/import-editor-package.mjs`: Node importer for `editor_imports/inbox/*.zip` packages.
+- `assets/editor_maps/`: permanent editor override assets and `latest.json` files by map id.
+- `editor_imports/inbox/`: local inbox for future editor package ZIPs.
 - `data.js`: lobby state constants, monster ability pool, puzzle type definitions, and game tuning constants.
 - `ui.js`: DOM menu, lobby, HUD, round menu, server menu, end screen, player rows, lobby browser, and flash messages.
 - `audio.js`: music/SFX path map, gesture-gated audio unlock, mute behavior, one-shot SFX, and procedural heartbeat.

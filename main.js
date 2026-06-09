@@ -6,6 +6,7 @@ import { PlayerController, FirstPersonCameraController } from './rosie/controls/
 import { AudioSystem } from './audio.js';
 import { GameUI } from './ui.js';
 import { initAssetEditor } from './editor/assetEditor.js';
+import { applyPermanentEditorOverrides, clearPermanentEditorOverrides } from './editor/editorOverrides.js';
 import { MONSTER_ABILITY_POOL, PUZZLE_TYPES, TUNING, LOBBY_STATES } from './data.js';
 import { DEFAULT_MAP_ID, MAP_OPTIONS } from './maps.js';
 import {
@@ -192,6 +193,7 @@ function isInteractKey(event) {
 }
 
 document.addEventListener('keydown', (event) => {
+  if (assetEditor?.handleEditorKeyboard?.(event, true)) return;
   if (event.code === 'Escape') { toggleServerMenu(); return; }
   keys.add(isInteractKey(event) ? INTERACT_KEY : event.code);
   if (isInteractKey(event) && !event.repeat) handleInteractTap();
@@ -199,7 +201,10 @@ document.addEventListener('keydown', (event) => {
   if (event.code === 'KeyQ') activateSelectedAbility();
   if (event.code === 'KeyR') cycleAbility(1);
 });
-document.addEventListener('keyup', (event) => keys.delete(isInteractKey(event) ? INTERACT_KEY : event.code));
+document.addEventListener('keyup', (event) => {
+  if (assetEditor?.handleEditorKeyboard?.(event, false)) return;
+  keys.delete(isInteractKey(event) ? INTERACT_KEY : event.code);
+});
 renderer.domElement.addEventListener('pointerdown', (event) => {
   audio.unlock();
   if (event.button === 0) tryAttack();
@@ -780,6 +785,7 @@ function toggleServerMenu() {
 }
 
 function rebuildMap(seed, mapId = selectedMapId) {
+  clearPermanentEditorOverrides(scene);
   clearWorld(world);
   clearPuzzles(puzzles);
   const layout = generateMapLayout(seed, mapId);
@@ -791,6 +797,9 @@ function rebuildMap(seed, mapId = selectedMapId) {
   interactables = world.interactables;
   puzzles = createPuzzleStations(scene, materials, layout);
   assetEditor?.refreshObjects?.();
+  applyPermanentEditorOverrides({ scene, mapId: selectedMapId })
+    .then(() => assetEditor?.refreshObjects?.())
+    .catch((error) => console.warn('[Rule Beast] editor override load failed:', error.message));
   return layout;
 }
 
@@ -1401,6 +1410,36 @@ function resolveWalls(object) {
   }
 }
 
+function isEditorModeActive() {
+  return Boolean(assetEditor?.isEditorModeActive?.());
+}
+
+function updateEditorFlyMovement(delta) {
+  if (!assetEditor?.shouldUseEditorMovement?.()) return false;
+  const input = assetEditor.editorFlyInput();
+  const move = new THREE.Vector3();
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  if (forward.lengthSq() < 0.0001) forward.set(0, 0, -1);
+  forward.normalize();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
+  if (right.lengthSq() < 0.0001) right.set(Math.cos(getLocalYaw()), 0, -Math.sin(getLocalYaw()));
+  right.normalize();
+  if (input.forward) move.add(forward);
+  if (input.back) move.sub(forward);
+  if (input.right) move.add(right);
+  if (input.left) move.sub(right);
+  if (input.up) move.y += 1;
+  if (input.down) move.y -= 1;
+  if (move.lengthSq() > 0.0001) {
+    move.normalize().multiplyScalar((input.speed || 8.5) * delta);
+    playerModel.position.add(move);
+    if (controller.velocity) controller.velocity.set(0, 0, 0);
+  }
+  if (input.collision) resolveWalls(playerModel);
+  return true;
+}
+
 function resetActivePuzzleProgress() {
   if (!game?.activeInteractPuzzleId) {
     if (game) game.interactHeld = 0;
@@ -1423,21 +1462,26 @@ function updateLocal(delta) {
   Object.keys(game.abilityCooldowns || {}).forEach((key) => { game.abilityCooldowns[key] = Math.max(0, game.abilityCooldowns[key] - delta); });
   Object.keys(game.activeAbilityEffects || {}).forEach((key) => { game.activeAbilityEffects[key] = Math.max(0, game.activeAbilityEffects[key] - delta); });
   Object.keys(game.survivorDebuffs || {}).forEach((key) => { game.survivorDebuffs[key] = Math.max(0, game.survivorDebuffs[key] - delta); });
+  const editorActive = isEditorModeActive();
   if (game.local.alive && !game.waitingBetweenRounds && !isAnyMenuOpen()) {
     const slowed = game.local.role === 'survivor' && (game.survivorDebuffs.globalSlow || 0) > 0;
-    controller.moveSpeed = game.local.role === 'monster' ? TUNING.monsterBaseSpeed + monsterSpeedBonus() : TUNING.survivorSpeed * (slowed ? 0.62 : 1);
-    controller.update(delta, getLocalYaw());
-    if (renderer.xr.isPresenting && vrMoveInput.lengthSq() > 0.001) {
-      const yaw = getLocalYaw();
-      const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-      const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-      playerModel.position.addScaledVector(right, vrMoveInput.x * controller.moveSpeed * delta);
-      playerModel.position.addScaledVector(forward, vrMoveInput.y * controller.moveSpeed * delta);
+    if (editorActive) {
+      updateEditorFlyMovement(delta);
+    } else {
+      controller.moveSpeed = game.local.role === 'monster' ? TUNING.monsterBaseSpeed + monsterSpeedBonus() : TUNING.survivorSpeed * (slowed ? 0.62 : 1);
+      controller.update(delta, getLocalYaw());
+      if (renderer.xr.isPresenting && vrMoveInput.lengthSq() > 0.001) {
+        const yaw = getLocalYaw();
+        const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+        const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+        playerModel.position.addScaledVector(right, vrMoveInput.x * controller.moveSpeed * delta);
+        playerModel.position.addScaledVector(forward, vrMoveInput.y * controller.moveSpeed * delta);
+      }
+      resolveWalls(playerModel);
     }
-    resolveWalls(playerModel);
   }
   fpCamera.update();
-  if (game.local.role === 'survivor' && game.local.alive && !game.waitingBetweenRounds && !isAnyMenuOpen()) {
+  if (!editorActive && game.local.role === 'survivor' && game.local.alive && !game.waitingBetweenRounds && !isAnyMenuOpen()) {
     const active = game.activePuzzles.find((p) => !p.solved && distance3D(playerModel.position, p.position) < 1.75);
     if (active && keys.has('KeyE')) {
       if (game.activeInteractPuzzleId !== active.id) {

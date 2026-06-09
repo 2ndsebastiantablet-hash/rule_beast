@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { EditorUI } from './editorUI.js';
 import { EditorState } from './editorState.js';
 import { buildEditorExport, downloadEditorJson, stringifyEditorExport } from './editorExport.js';
+import { buildCodexPackage, downloadCodexPackage } from './editorPackage.js';
 import {
   getEditableObject,
   getEditableObjects,
@@ -19,7 +20,15 @@ import {
 const TEXTURE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
 const TEXTURE_MIMES = ['image/png', 'image/jpeg', 'image/webp'];
 const GLB_MIMES = ['model/gltf-binary', 'application/octet-stream', ''];
-const MIN_SCALE = 0.05;
+const MIN_SCALE = 0.1;
+const EDITOR_MOVE_STEP = 0.5;
+const EDITOR_VERTICAL_MOVE_STEP = 0.5;
+const EDITOR_ROTATE_STEP = Math.PI / 12;
+const EDITOR_SCALE_STEP = 0.1;
+const EDITOR_FLY_SPEED = 8.5;
+const MODEL_KEY_CODES = ['KeyQ', 'KeyE', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Backspace', 'Escape'];
+const FLY_KEY_CODES = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight'];
+const GAME_ACTION_CODES = ['KeyE', 'KeyF', 'KeyQ', 'KeyR', 'Space'];
 
 const nextId = (prefix, list) => `${prefix}_${String(list.length + 1).padStart(3, '0')}_${Date.now().toString(36)}`;
 const repoPath = (folder, name) => `assets/${folder}/${name.replace(/[^a-z0-9._-]/gi, '_')}`;
@@ -88,6 +97,8 @@ class AssetEditor {
     this.toolMode = 'select';
     this.selectedTextureId = '';
     this.selectedModelId = '';
+    this.editorCollisionEnabled = true;
+    this.editorKeys = new Set();
     this.messages = [];
     initializeEditableRegistry(options.scene);
     setSelectionChangedHandler((meta) => this.onSelectionChanged(meta));
@@ -114,7 +125,9 @@ class AssetEditor {
       saveDraft: () => this.saveDraft(),
       loadDraft: () => this.loadDraft(),
       clearDraft: () => this.clearDraft(),
-      exportJson: () => this.exportJson()
+      exportJson: () => this.exportJson(),
+      exportCodexPackage: () => this.exportCodexPackage(),
+      toggleCollision: () => this.toggleEditorCollision()
     });
     options.renderer.domElement.addEventListener('pointerdown', (event) => this.handleCanvasPointerDown(event), true);
     options.renderer.domElement.addEventListener('dragover', (event) => this.handleCanvasDragOver(event), true);
@@ -129,6 +142,116 @@ class AssetEditor {
 
   currentMapName() {
     return this.options.getCurrentMapName?.() || this.currentMapId();
+  }
+
+  isEditorModeActive() {
+    return this.enabled;
+  }
+
+  isTypingInInput(event) {
+    const target = event.target;
+    if (!target || !(target instanceof Element)) return false;
+    const tag = target.tagName?.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+  }
+
+  hasSelectedPlacedModel() {
+    const meta = getSelectedEditableObject();
+    return Boolean(meta?.supportsTransform && this.state.modelPlacement(meta.id));
+  }
+
+  shouldUseEditorMovement() {
+    return this.enabled && !this.hasSelectedPlacedModel();
+  }
+
+  editorFlyInput() {
+    return {
+      forward: this.editorKeys.has('KeyW'),
+      back: this.editorKeys.has('KeyS'),
+      left: this.editorKeys.has('KeyA'),
+      right: this.editorKeys.has('KeyD'),
+      up: this.editorKeys.has('Space'),
+      down: this.editorKeys.has('ShiftLeft') || this.editorKeys.has('ShiftRight') || this.editorKeys.has('ControlLeft') || this.editorKeys.has('ControlRight'),
+      collision: this.editorCollisionEnabled,
+      speed: EDITOR_FLY_SPEED
+    };
+  }
+
+  toggleEditorCollision() {
+    this.editorCollisionEnabled = !this.editorCollisionEnabled;
+    this.refreshObjects();
+    this.log(`Editor collision ${this.editorCollisionEnabled ? 'ON' : 'OFF'}.`);
+    return this.editorCollisionEnabled;
+  }
+
+  handleEditorKeyboard(event, pressed = true) {
+    if (!this.enabled || this.isTypingInInput(event)) return false;
+    const code = event.code;
+    const selectedModel = this.hasSelectedPlacedModel();
+
+    if (selectedModel && MODEL_KEY_CODES.includes(code)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (pressed) this.handleSelectedModelKey(code);
+      return true;
+    }
+
+    if (!selectedModel && FLY_KEY_CODES.includes(code)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (pressed) this.editorKeys.add(code);
+      else this.editorKeys.delete(code);
+      return true;
+    }
+
+    if (code === 'KeyC') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (pressed && !event.repeat) this.toggleEditorCollision();
+      return true;
+    }
+
+    if (code.startsWith('Arrow')) {
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+
+    if (GAME_ACTION_CODES.includes(code)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+
+    return false;
+  }
+
+  handleSelectedModelKey(code) {
+    const steps = this.ui.controlSteps?.() || {
+      move: EDITOR_MOVE_STEP,
+      verticalMove: EDITOR_VERTICAL_MOVE_STEP,
+      rotate: EDITOR_ROTATE_STEP,
+      scale: EDITOR_SCALE_STEP
+    };
+    const verticalMove = steps.verticalMove || steps.move || EDITOR_VERTICAL_MOVE_STEP;
+    if (code === 'KeyQ') return this.modelAction('bigger', steps);
+    if (code === 'KeyE') return this.modelAction('smaller', steps);
+    if (code === 'KeyW') return this.modelAction('move-forward', steps);
+    if (code === 'KeyA') return this.modelAction('move-left', steps);
+    if (code === 'KeyS') return this.modelAction('move-back', steps);
+    if (code === 'KeyD') return this.modelAction('move-right', steps);
+    if (code === 'ArrowUp') return this.modelAction('move-up', { ...steps, move: verticalMove });
+    if (code === 'ArrowDown') return this.modelAction('move-down', { ...steps, move: verticalMove });
+    if (code === 'ArrowLeft') return this.modelAction('rotate-left', steps);
+    if (code === 'ArrowRight') return this.modelAction('rotate-right', steps);
+    if (code === 'Delete' || code === 'Backspace') return this.deleteSelectedModel();
+    if (code === 'Escape') {
+      clearEditableSelection();
+      this.setToolMode('select');
+      this.refreshObjects();
+      return null;
+    }
+    return null;
   }
 
   unlock(code) {
@@ -146,6 +269,8 @@ class AssetEditor {
 
   close() {
     this.enabled = false;
+    this.editorKeys.clear();
+    this.editorCollisionEnabled = true;
     clearEditableSelection();
     this.ui.setUnlocked(false);
     this.options.onEditorModeChange?.(false);
@@ -160,6 +285,13 @@ class AssetEditor {
   refreshObjects() {
     const selected = getSelectedEditableObject();
     this.ui.setMapSummary(`Map: ${this.currentMapName()} (${this.currentMapId()})`);
+    this.ui.setStatus?.({
+      editorActive: this.enabled,
+      flyActive: this.shouldUseEditorMovement(),
+      collisionEnabled: this.editorCollisionEnabled,
+      toolMode: this.toolMode,
+      selectedId: selected?.id || 'none'
+    });
     this.ui.setTextures(this.state.textures, this.selectedTextureId);
     this.ui.setModels(this.state.models, this.selectedModelId);
     this.ui.setPlacedModels(this.state.placedModels, selected?.id);
@@ -234,7 +366,8 @@ class AssetEditor {
         createdAt: Date.now(),
         warnings,
         textureObject: texture,
-        imageElement: image
+        imageElement: image,
+        originalFile: file
       });
       warnings.forEach((warning) => this.state.warn(`${file.name}: ${warning}`));
       this.selectTexture(meta.id);
@@ -281,7 +414,8 @@ class AssetEditor {
         createdAt: Date.now(),
         warnings,
         loadedScene: gltf.scene,
-        gltf
+        gltf,
+        originalFile: file
       });
       this.selectModel(meta.id);
       this.log(`GLB uploaded: ${file.name}`);
@@ -338,6 +472,9 @@ class AssetEditor {
     if (target.meta) {
       selectEditableObject(target.meta.id);
       if (target.meta.supportsTransform) this.setToolMode('edit');
+      this.refreshObjects();
+    } else if (this.toolMode === 'select') {
+      clearEditableSelection();
       this.refreshObjects();
     }
   }
@@ -538,6 +675,40 @@ class AssetEditor {
     this.refreshObjects();
   }
 
+  applyPlacementTransform(object, placement) {
+    object.position.set(placement.position?.x || 0, placement.position?.y || 0, placement.position?.z || 0);
+    object.rotation.set(placement.rotation?.x || 0, placement.rotation?.y || 0, placement.rotation?.z || 0);
+    object.scale.set(
+      Math.max(MIN_SCALE, placement.scale?.x || 1),
+      Math.max(MIN_SCALE, placement.scale?.y || 1),
+      Math.max(MIN_SCALE, placement.scale?.z || 1)
+    );
+    object.updateMatrixWorld(true);
+  }
+
+  restoreDraftPlacement(placement, asset) {
+    if (!asset?.loadedScene) return false;
+    const object = this.cloneModelScene(asset.loadedScene);
+    this.applyPlacementTransform(object, placement);
+    this.options.scene.add(object);
+    placement.object3D = object;
+    placement.missingLocalFile = false;
+    registerEditableObject({
+      id: placement.id,
+      type: 'model',
+      category: 'placed-model',
+      mapId: placement.mapId || this.currentMapId(),
+      floor: placement.floor || this.floorFromY(object.position.y),
+      zone: placement.zone || 'editor_local',
+      object3D: object,
+      supportsTexture: false,
+      supportsTransform: true,
+      source: 'editor-import'
+    });
+    this.applyModelBrightness(placement, placement.modelBrightness || placement.brightness || 1);
+    return true;
+  }
+
   mutateSelectedModel(mutator) {
     const placement = this.selectedPlacement();
     const meta = getSelectedEditableObject();
@@ -682,11 +853,19 @@ class AssetEditor {
 
   loadDraft() {
     try {
+      const runtimeTextures = new Map(this.state.textures.map((texture) => [texture.id, texture]));
+      const runtimeModels = new Map(this.state.models.map((model) => [model.id, model]));
       this.state.placedModels.forEach((placement) => placement.object3D?.parent?.remove(placement.object3D));
       getEditableObjects().filter((meta) => meta.source === 'editor-import').forEach((meta) => unregisterEditableObject(meta.id));
       clearEditableSelection();
       const draft = this.state.loadDraft();
       if (!draft) return this.log('No local draft found.');
+      this.state.textures = this.state.textures.map((texture) => ({ ...texture, ...runtimeTextures.get(texture.id) }));
+      this.state.models = this.state.models.map((model) => ({ ...model, ...runtimeModels.get(model.id) }));
+      this.state.placedModels.forEach((placement) => {
+        const asset = this.state.models.find((model) => model.id === placement.modelAssetId);
+        if (!this.restoreDraftPlacement(placement, asset)) placement.missingLocalFile = true;
+      });
       this.selectedTextureId = '';
       this.selectedModelId = '';
       this.refreshObjects();
@@ -709,6 +888,24 @@ class AssetEditor {
     this.ui.setJsonText(text);
     const fileName = downloadEditorJson(data);
     this.log(`Export Editor JSON downloaded: ${fileName}`);
+  }
+
+  async exportCodexPackage() {
+    try {
+      const result = await buildCodexPackage({
+        mapId: this.currentMapId(),
+        mapDisplayName: this.currentMapName(),
+        state: this.state
+      });
+      result.warnings.forEach((warning) => this.state.warn(warning));
+      downloadCodexPackage(result);
+      this.log(result.warnings.length
+        ? `Export Codex Package downloaded: ${result.zipFileName}\n${result.warnings.join('\n')}`
+        : `Export Codex Package downloaded: ${result.zipFileName}`);
+    } catch (error) {
+      this.state.warn(`Codex package export failed: ${error.message}`);
+      this.log(`Codex package export failed: ${error.message}`);
+    }
   }
 
   updateStats() {

@@ -121,12 +121,12 @@ export class EditorState {
 }
 
 export function stripRuntimeTexture(texture) {
-  const { textureObject, imageElement, ...rest } = texture;
+  const { textureObject, imageElement, originalFile, ...rest } = texture;
   return rest;
 }
 
 export function stripRuntimeModel(model) {
-  const { loadedScene, gltf, ...rest } = model;
+  const { loadedScene, gltf, originalFile, ...rest } = model;
   return rest;
 }
 

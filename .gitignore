@@ -34,6 +34,8 @@ releases/
 
 # Local exported archives and reference builds
 *.zip
+editor_imports/inbox/*.zip
+!editor_imports/inbox/.gitkeep
 rule_beast_roesbud_build2_files/
 rule_beast_rosebud_buid2_files/
 rule-beast-vr_Windows_Build_rosebud build2/
