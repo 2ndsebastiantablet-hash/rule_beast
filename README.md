@@ -77,6 +77,7 @@ Current maps register floors, room slabs, paths, grass, walls, doors, and simple
 Texture workflow:
 
 - Import `.png`, `.jpg`, `.jpeg`, or `.webp` from your computer.
+- Upload validation accepts valid extensions even when the browser reports an empty or generic MIME type.
 - Uploaded textures appear in `My Textures` with the file name and preview thumbnail.
 - Click a texture to enter Paint Texture Mode, then click a wall, floor, path, grass patch, door, or simple prop.
 - You can also drag a texture card from `My Textures` onto the game canvas.
@@ -99,7 +100,7 @@ Images / GIFs:
 - Uploaded images appear in `Images / GIFs`.
 - Click or drag an image/GIF to place it as a flat billboard plane.
 - Image/GIF planes can be moved, rotated, resized, brightened, duplicated, deleted, and exported.
-- GIFs are accepted, but this version warns that GIFs display as static image planes.
+- GIFs are accepted, appear in `My Images/GIFs`, and can be placed. This version uses the safe fallback warning `GIF loaded as static image in this version.` when GIF animation is unreliable.
 - Image/GIF planes default collision OFF, but can be toggled ON.
 
 Shape Library:
@@ -116,6 +117,35 @@ Map markers:
 
 - The compact marker buttons place Survivor Spawn, Monster Spawn, Puzzle Station, and Point Light markers.
 - New-map Codex Packages should include survivor spawn, monster spawn, and puzzle station marker data. The importer refuses to create a broken new map if required marker data is missing.
+
+Liquid volumes:
+
+- `Liquids` places water, acid, slime, lava, oil, toxic waste, black goo, blood pool, deep water, or custom liquid volumes.
+- Liquids are transparent box volumes that can be moved, rotated, resized, colored, brightened, duplicated, deleted, and exported.
+- Defaults are safe: blue, 0.5 opacity, no damage, no instant kill, no sink, movement multiplier 0.8, and collision OFF as volume-only gameplay data.
+- Selected liquids expose settings for color, opacity, damage per second, movement multiplier, sink speed, hurts ON/OFF, instant kill, sink, and slime behavior.
+
+Gas / fog volumes:
+
+- `Gas/Fog Settings` places fog cloud, poison gas, smoke, black fog, green toxic gas, blue cold mist, red danger gas, low-gravity field, heavy-gravity field, or custom gas volumes.
+- Gas/fog volumes use lightweight transparent boxes rather than heavy particle systems.
+- Selected gas/fog exposes color, opacity, density, damage per second, movement multiplier, gravity multiplier, upward force, downward force, vision, and gravity toggles.
+- Gas/fog can slow, hurt, instant-kill, affect fog/vision, or modify gravity while the local player is inside.
+
+Map gravity and Sun/Main Light:
+
+- `Map Settings` stores map-level `gravityMultiplier`, `airControl`, and `drag` values. Defaults preserve normal gameplay.
+- Gas/fog gravity volumes combine with the map gravity multiplier while the player is inside them.
+- `Sun / Main Light` adds one movable directional main-light object with color, brightness, ambient boost metadata, and shadow toggle.
+- If no sun is placed, maps keep their current default lighting.
+
+Collision box editing:
+
+- Toggle `Show Collision Boxes` to see editor-only collision helpers.
+- Collision ON helpers are green; collision OFF helpers are gray/red; the selected collision box is highlighted yellow/green.
+- `Edit Collision Box` switches keyboard controls to the selected object's collision box. `Return To Object Editing` switches back.
+- `Reset Collision Box To Object Bounds` recalculates the box from the visual object.
+- Collision box edits export as size/offset/min/max data and are used by editor-created collision in gameplay.
 
 Editor Fly Mode:
 
@@ -147,6 +177,7 @@ Keyboard Object Editing:
 - `Delete` or `Backspace` deletes the selected object.
 - `Esc` clears the selection.
 - `C` toggles selected-object collision. When no object is selected, `C` toggles editor fly collision.
+- `Ctrl+C` duplicates the selected object with a small offset; the copy becomes selected and can be moved away.
 - While an object is selected, those keys edit the object and do not trigger normal movement, puzzle, attack, or monster ability controls.
 
 Local drafts:
@@ -159,12 +190,13 @@ Local drafts:
 Export Editor JSON:
 
 - Export Editor JSON downloads a readable JSON file and fills the export textarea.
-- The JSON includes package type, map id/name, uploaded texture/image/GIF/model metadata, changed surfaces, placed shapes, placed image/GIF planes, placed GLBs, marker/light data, brightness settings, collision settings, animation settings, warnings, and a note that local blob URLs are temporary.
+- The JSON includes package type, map id/name, uploaded texture/image/GIF/model metadata, changed surfaces, placed shapes, placed image/GIF planes, placed GLBs, liquid volumes, gas/fog volumes, map gravity settings, Sun/Main Light data, marker/light data, brightness/color settings, collision settings, collision box transforms, animation settings, warnings, and a note that local blob URLs are temporary.
 
 Export Codex Package:
 
 - Export Codex Package downloads a real ZIP using the lightweight browser `fflate` dependency loaded from the import map.
 - The ZIP contains `manifest.json`, `textures/`, `images/`, `gifs/`, `models/`, and `codex_import_prompt.txt`.
+- The manifest includes liquid volumes, gas/fog volumes, map settings, Sun/Main Light data, copied/duplicated objects, collision enabled/disabled state, collision box transforms, image/GIF asset info, model animation settings, object transforms, color/brightness settings, and surface texture edits.
 - Set `Map Package Type` to `New Map` or `Update Existing Map` before export.
 - New-map manifests include `packageType: "newMap"`, `mapId`, and `displayName`.
 - Existing-map update manifests include `packageType: "updateExistingMap"`, `mapId`, and `displayName`.
@@ -183,7 +215,7 @@ Making Editor Changes Permanent:
 - The importer writes `assets/editor_maps/<mapId>/latest.json`.
 - If `packageType` is `newMap`, the importer validates spawn/puzzle marker data and updates `assets/editor_maps/index.json` so the map can appear in the selector after reload.
 - If `packageType` is `updateExistingMap`, the importer updates the existing map override.
-- The game loads `assets/editor_maps/<mapId>/latest.json` after the built-in or blank editor map is created.
+- The game loads `assets/editor_maps/<mapId>/latest.json` after the built-in or blank editor map is created, including liquids, gas/fog, map settings, Sun/Main Light, collision edits, image/GIF planes, and animated GLB settings.
 - Codex commits and pushes. Players refresh/reload to see the permanent map update.
 
 Permanent Override System:
@@ -192,7 +224,14 @@ Permanent Override System:
 - Permanent editor overrides live in `assets/editor_maps/<mapId>/latest.json`.
 - Missing `latest.json` is fine; the game continues with the built-in map.
 - If `latest.json` or an asset fails to load, the loader logs a warning, skips that item, and keeps the map playable.
-- Overrides can apply surface textures, surface brightness, placed GLB models, animated GLB playback, placed shapes, placed image/GIF planes, collision boxes, spawn markers, puzzle station markers, lights, transforms, and brightness.
+- Overrides can apply surface textures, surface brightness, placed GLB models, animated GLB playback, placed shapes, placed image/GIF planes, liquid volumes, gas/fog volumes, map gravity settings, Sun/Main Light, collision boxes, spawn markers, puzzle station markers, lights, transforms, and brightness.
+
+Volume effects limitations:
+
+- Volume effects use simple axis-aligned box checks against the local player.
+- Effects are local-only for this pass and are not synced through multiplayer.
+- Damage over time accumulates locally and kills at 100 accumulated damage; instant-kill volumes kill immediately.
+- Multiple overlapping volumes combine conservatively: instant kill wins, damage adds, movement uses the slowest multiplier, and gravity multipliers combine.
 
 Editor Imports Folder:
 
@@ -200,23 +239,24 @@ Editor Imports Folder:
 - `editor_imports/inbox/*.zip` is gitignored so large temporary packages do not get committed by accident.
 - `editor_imports/inbox/.gitkeep` keeps the folder convention in the repo.
 
-Current limitations: local-only testing is not multiplayer synced, GIFs display as static image planes in this version, collision is simple bounding-box collision rather than mesh collision, there is no cloud publishing, there is no GitHub upload from inside the game, exported packages must be imported by Codex, and large assets can hurt browser or VR performance.
+Current limitations: local-only testing is not multiplayer synced, GIFs may display as static image planes in this version, collision and volume effects use simple bounding boxes rather than mesh physics, there is no cloud publishing, there is no GitHub upload from inside the game, exported packages must be imported by Codex, and large assets can hurt browser or VR performance.
 
 ## Main Files
 
 - `index.html`: page shell, import map, `fflate` browser ZIP dependency, CSS, containers, and script loading.
-- `main.js`: Three.js renderer/bootstrap, WebXR setup, brighter global/map lighting, local admin editor and Map Maker initialization, editor fly/collision routing, editor-created collision colliders, permanent override loading, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
+- `main.js`: Three.js renderer/bootstrap, WebXR setup, brighter global/map lighting, local admin editor and Map Maker initialization, editor fly/collision routing, editor-created collision colliders, permanent override loading, volume effect checks, map gravity multiplier, InstantDB lobby/presence/topic handling, match rules, multiplayer map selection, map rebuilds, round flow, floor-aware movement/collision, stair interaction, spread puzzle selection, puzzle completion, attacks, monster ability effects, HUD updates, and render loop.
 - `entities.js`: materials, map loading, editable surface registration, multi-floor world geometry, rooms, corridors, walls, doors, stairwell markers, boosted map lights, props, player/monster models, local hands, puzzle station meshes, remote markers, corpses, and distance helpers.
 - `maps.js`: map IDs/options, blank Map Maker workspace layout, `default_bunker_lab`, `amusement_park`, and `hotel` definitions, map lighting profiles, wall snapping/overlap helpers, map factory, floor heights, room/path sizes, grass sections, wall colliders, stair connections, doors, spawn points, puzzle station zones, and light positions.
-- `editor/assetEditor.js`: local-only editor coordinator for admin unlock, Map Maker sessions, texture imports, image/GIF imports, GLB imports, animated GLB mixers, built-in shape placement, marker/light placement, click/drag paint and place modes, editor fly/collision state, selected-object keyboard editing, brightness, transforms, canvas selection, draft actions, and export actions.
+- `editor/assetEditor.js`: local-only editor coordinator for admin unlock, Map Maker sessions, texture imports, image/GIF imports, GLB imports, animated GLB mixers, built-in shape placement, liquid/gas volume placement, Sun/Main Light placement, marker/light placement, click/drag paint and place modes, editor fly/collision state, collision-box editing, selected-object keyboard editing, brightness, transforms, canvas selection, draft actions, and export actions.
 - `editor/shapeLibrary.js`: data-driven 100-entry shape registry limited to Basic shapes, Architecture, and Decorative shapes, plus Three.js primitive/group shape factory.
+- `editor/volumeObjects.js`: shared liquid/gas/sun definitions, default settings, Three.js object factories, visual updates, and volume containment checks.
 - `editor/editorRegistry.js`: editable object registry, selection helpers, and BoxHelper highlighting.
 - `editor/editorState.js`: editor runtime state and metadata-only local draft save/load.
-- `editor/editorUI.js`: DOM editor unlock box, scrollable simplified editor panel, upload lists, shape library search, package type fields, selected object info, collision controls, save/export controls, and keyboard help.
-- `editor/editorExport.js`: Export Editor JSON builder for new-map/update metadata, assets, placed objects, collision, animation, markers, lights, and download helper.
+- `editor/editorUI.js`: DOM editor unlock box, scrollable simplified editor panel, upload lists, shape library search, liquid/gas/map/sun panels, package type fields, selected object info, collision controls, save/export controls, and keyboard help.
+- `editor/editorExport.js`: Export Editor JSON builder for new-map/update metadata, assets, placed objects, collision, animation, liquid/gas volumes, map settings, sun lights, markers, lights, and download helper.
 - `editor/editorPackage.js`: Export Codex Package ZIP builder for textures, images, GIFs, models, manifest, and `codex_import_prompt.txt`.
-- `editor/editorOverrides.js`: permanent static editor override loader for `assets/editor_maps/<mapId>/latest.json`, including placed shapes, image/GIF planes, GLBs, animations, collision, markers, and lights.
-- `tools/import-editor-package.mjs`: Node importer for `editor_imports/inbox/*.zip` packages, including new-map/update handling, asset copying, required marker validation, and editor map index updates.
+- `editor/editorOverrides.js`: permanent static editor override loader for `assets/editor_maps/<mapId>/latest.json`, including placed shapes, image/GIF planes, GLBs, animations, collision, liquid/gas volumes, map settings, sun lights, markers, and lights.
+- `tools/import-editor-package.mjs`: Node importer for `editor_imports/inbox/*.zip` packages, including new-map/update handling, asset copying, liquids, gas/fog, map gravity, sun lights, collision edits, required marker validation, and editor map index updates.
 - `assets/editor_maps/`: permanent editor override assets and `latest.json` files by map id.
 - `editor_imports/inbox/`: local inbox for future editor package ZIPs.
 - `data.js`: lobby state constants, monster ability pool, puzzle type definitions, and game tuning constants.

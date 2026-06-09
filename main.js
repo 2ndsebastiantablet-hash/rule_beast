@@ -6,7 +6,8 @@ import { PlayerController, FirstPersonCameraController } from './rosie/controls/
 import { AudioSystem } from './audio.js';
 import { GameUI } from './ui.js';
 import { initAssetEditor } from './editor/assetEditor.js';
-import { applyPermanentEditorOverrides, clearPermanentEditorOverrides, getPermanentEditorCollisionColliders, updatePermanentEditorOverrides } from './editor/editorOverrides.js';
+import { applyPermanentEditorOverrides, clearPermanentEditorOverrides, getPermanentEditorCollisionColliders, getPermanentEditorMapSettings, getPermanentEditorVolumeEffects, updatePermanentEditorOverrides } from './editor/editorOverrides.js';
+import { pointInsideVolume } from './editor/volumeObjects.js';
 import { MONSTER_ABILITY_POOL, PUZZLE_TYPES, TUNING, LOBBY_STATES } from './data.js';
 import { DEFAULT_MAP_ID, MAP_OPTIONS, createBlankMapMakerLayout } from './maps.js';
 import {
@@ -97,6 +98,8 @@ let mapMakerSession = null;
 let puzzles = [];
 let colliders = [];
 let interactables = { doors: [], roomLabels: [], stairs: [] };
+let mapGravityMultiplier = 1;
+let volumeEffectState = { movementMultiplier: 1, gravityMultiplier: 1, upwardForce: 0, downwardForce: 0, visionMultiplier: 1, inVolume: false };
 let playerModel = createPlayerModel('survivor');
 let localHands = createLocalHands(camera, materials);
 localHands.visible = false;
@@ -806,6 +809,8 @@ function toggleServerMenu() {
 
 function rebuildMap(seed, mapId = selectedMapId, layoutOverride = null) {
   clearPermanentEditorOverrides(scene);
+  mapGravityMultiplier = 1;
+  volumeEffectState = { movementMultiplier: 1, gravityMultiplier: 1, upwardForce: 0, downwardForce: 0, visionMultiplier: 1, inVolume: false };
   clearWorld(world);
   clearPuzzles(puzzles);
   const layout = layoutOverride || generateMapLayout(seed, mapId);
@@ -818,7 +823,11 @@ function rebuildMap(seed, mapId = selectedMapId, layoutOverride = null) {
   puzzles = createPuzzleStations(scene, materials, layout);
   assetEditor?.refreshObjects?.();
   applyPermanentEditorOverrides({ scene, mapId: selectedMapId })
-    .then(() => assetEditor?.refreshObjects?.())
+    .then(() => {
+      const settings = getPermanentEditorMapSettings?.();
+      mapGravityMultiplier = Number(settings?.gravityMultiplier || 1);
+      assetEditor?.refreshObjects?.();
+    })
     .catch((error) => console.warn('[Rule Beast] editor override load failed:', error.message));
   return layout;
 }
@@ -1547,6 +1556,75 @@ function resetActivePuzzleProgress() {
   game.interactHeld = 0;
 }
 
+function combinedVolumeEffects() {
+  const effects = {
+    movementMultiplier: 1,
+    gravityMultiplier: Math.max(0, mapGravityMultiplier || 1),
+    upwardForce: 0,
+    downwardForce: 0,
+    visionMultiplier: 1,
+    damagePerSecond: 0,
+    instantKill: false,
+    inVolume: false
+  };
+  const volumes = getPermanentEditorVolumeEffects?.() || [];
+  volumes.forEach((volume) => {
+    if (!pointInsideVolume(playerModel.position, volume)) return;
+    const gameplay = volume.gameplay || {};
+    const role = game?.local?.role;
+    if ((role === 'monster' && gameplay.monsterImmune) || (role === 'survivor' && gameplay.survivorImmune)) return;
+    effects.inVolume = true;
+    effects.instantKill = effects.instantKill || Boolean(gameplay.instantKill);
+    effects.damagePerSecond += Number(gameplay.damagePerSecond || 0);
+    if (Number.isFinite(Number(gameplay.movementMultiplier))) effects.movementMultiplier = Math.min(effects.movementMultiplier, Math.max(0.05, Number(gameplay.movementMultiplier)));
+    if (gameplay.sinkEnabled) effects.downwardForce += Number(gameplay.sinkSpeed || 0);
+    if (gameplay.isSlime) effects.movementMultiplier = Math.min(effects.movementMultiplier, Math.max(0.05, 1 - Number(gameplay.stickiness || 0.45)));
+    if (gameplay.affectsGravity) effects.gravityMultiplier *= Math.max(0, Number(gameplay.gravityMultiplier || 1));
+    effects.upwardForce += Number(gameplay.upwardForce || 0);
+    effects.downwardForce += Number(gameplay.downwardForce || 0);
+    if (gameplay.affectsVision) effects.visionMultiplier = Math.min(effects.visionMultiplier, Math.max(0.1, Number(gameplay.visionMultiplier || 1)));
+  });
+  return effects;
+}
+
+function mapGravityMoveMultiplier() {
+  const gravity = Math.max(0.05, mapGravityMultiplier || 1);
+  return gravity > 1 ? 1 / Math.sqrt(gravity) : 1;
+}
+
+// Volume effects are intentionally simple and local-only for this pass:
+// box containment checks combine movement, damage, gravity, and fog modifiers each frame.
+function updateVolumeEffects(delta) {
+  if (!game || mapMakerMode || isEditorModeActive() || !game.local.alive) {
+    volumeEffectState = { movementMultiplier: 1, gravityMultiplier: Math.max(0, mapGravityMultiplier || 1), upwardForce: 0, downwardForce: 0, visionMultiplier: 1, inVolume: false };
+    return;
+  }
+  const effects = combinedVolumeEffects();
+  volumeEffectState = effects;
+  if (effects.instantKill) {
+    room?.publishTopic('lobby-event', { type: 'player-killed', playerId: myId, byId: 'volume' });
+    applyPlayerKilled(myId);
+    return;
+  }
+  if (effects.damagePerSecond > 0) {
+    game.local.volumeDamage = (game.local.volumeDamage || 0) + effects.damagePerSecond * delta;
+    if (game.local.volumeDamage >= 100) {
+      room?.publishTopic('lobby-event', { type: 'player-killed', playerId: myId, byId: 'volume' });
+      applyPlayerKilled(myId);
+      return;
+    }
+  } else game.local.volumeDamage = Math.max(0, (game.local.volumeDamage || 0) - delta * 18);
+  const verticalForce = (effects.upwardForce || 0) - (effects.downwardForce || 0);
+  if (Math.abs(verticalForce) > 0.001) {
+    playerModel.position.y += verticalForce * delta * Math.max(0.1, effects.gravityMultiplier || 1);
+    if (controller.velocity) controller.velocity.y = 0;
+  }
+  if (scene.fog && effects.visionMultiplier < 1) {
+    const targetDensity = currentBaseFogDensity / Math.max(0.15, effects.visionMultiplier);
+    scene.fog.density = THREE.MathUtils.lerp(scene.fog.density, targetDensity, delta * 1.8);
+  }
+}
+
 function updateLocal(delta) {
   if (!game || game.ended) return;
   game.countdown = Math.max(0, game.countdown - delta);
@@ -1556,12 +1634,14 @@ function updateLocal(delta) {
   Object.keys(game.activeAbilityEffects || {}).forEach((key) => { game.activeAbilityEffects[key] = Math.max(0, game.activeAbilityEffects[key] - delta); });
   Object.keys(game.survivorDebuffs || {}).forEach((key) => { game.survivorDebuffs[key] = Math.max(0, game.survivorDebuffs[key] - delta); });
   const editorActive = isEditorModeActive();
+  updateVolumeEffects(delta);
   if (game.local.alive && !game.waitingBetweenRounds && !isAnyMenuOpen()) {
     const slowed = game.local.role === 'survivor' && (game.survivorDebuffs.globalSlow || 0) > 0;
     if (editorActive) {
       updateEditorFlyMovement(delta);
     } else {
-      controller.moveSpeed = game.local.role === 'monster' ? TUNING.monsterBaseSpeed + monsterSpeedBonus() : TUNING.survivorSpeed * (slowed ? 0.62 : 1);
+      const volumeMove = (volumeEffectState.movementMultiplier || 1) * mapGravityMoveMultiplier();
+      controller.moveSpeed = (game.local.role === 'monster' ? TUNING.monsterBaseSpeed + monsterSpeedBonus() : TUNING.survivorSpeed * (slowed ? 0.62 : 1)) * volumeMove;
       controller.update(delta, getLocalYaw());
       if (renderer.xr.isPresenting && vrMoveInput.lengthSq() > 0.001) {
         const yaw = getLocalYaw();

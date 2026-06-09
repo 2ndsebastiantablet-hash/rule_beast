@@ -197,6 +197,11 @@ try {
   };
   manifest.importedAt = new Date().toISOString();
   manifest.importSourceZip = zipPath;
+  manifest.mapSettings = manifest.mapSettings || { gravityMultiplier: 1, airControl: 1, drag: 1 };
+  manifest.placedLiquidVolumes = manifest.placedLiquidVolumes || [];
+  manifest.placedGasVolumes = manifest.placedGasVolumes || [];
+  manifest.sunLights = manifest.sunLights || [];
+  manifest.collisionBoxTransforms = manifest.collisionBoxTransforms || [];
   manifest.warnings = [...(manifest.warnings || []), ...warnings];
   const latestPath = join(mapDir, 'latest.json');
   writeFileSync(latestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -216,6 +221,11 @@ try {
   console.log(`Placed models: ${(manifest.placedModels || []).length}`);
   console.log(`Placed shapes: ${(manifest.placedShapes || []).length}`);
   console.log(`Image planes: ${(manifest.placedImagePlanes || []).length}`);
+  console.log(`Liquid volumes: ${(manifest.placedLiquidVolumes || []).length}`);
+  console.log(`Gas/fog volumes: ${(manifest.placedGasVolumes || []).length}`);
+  console.log(`Sun/Main Light objects: ${(manifest.sunLights || []).length}`);
+  console.log(`Map gravity settings: ${JSON.stringify(manifest.mapSettings || {})}`);
+  console.log(`Collision box edits: ${(manifest.collisionBoxTransforms || []).length}`);
   console.log(`Spawn markers: ${(manifest.spawnMarkers || []).length}`);
   console.log(`Puzzle station markers: ${(manifest.puzzleStationMarkers || []).length}`);
   console.log(`Skipped items: ${skipped.length}`);

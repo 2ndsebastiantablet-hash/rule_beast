@@ -7,12 +7,21 @@ import {
 } from './editorRegistry.js';
 import { applyBrightnessToMaterial } from './assetEditor.js';
 import { createShapeObject } from './shapeLibrary.js';
+import {
+  createGasVolumeObject,
+  createLiquidVolumeObject,
+  createSunLightObject,
+  updateVolumeVisual
+} from './volumeObjects.js';
 
 const textureLoader = new THREE.TextureLoader();
 const gltfLoader = new GLTFLoader();
 let permanentOverrideObjects = [];
 let permanentMixers = [];
 let permanentCollisionColliders = [];
+let permanentVolumeEffects = [];
+let permanentMapSettings = null;
+let permanentSunLights = [];
 
 function materialsOf(material) {
   if (!material) return [];
@@ -132,6 +141,9 @@ export function clearPermanentEditorOverrides(scene) {
   permanentOverrideObjects = [];
   permanentMixers = [];
   permanentCollisionColliders = [];
+  permanentVolumeEffects = [];
+  permanentMapSettings = null;
+  permanentSunLights = [];
   unregisterEditableObjectsBySource('permanent-editor');
 }
 
@@ -141,6 +153,39 @@ export function updatePermanentEditorOverrides(delta) {
 
 export function getPermanentEditorCollisionColliders() {
   return permanentCollisionColliders;
+}
+
+export function getPermanentEditorVolumeEffects() {
+  return permanentVolumeEffects;
+}
+
+export function getPermanentEditorMapSettings() {
+  return permanentMapSettings;
+}
+
+export function setPermanentEditorVolumeEffects(effects = []) {
+  permanentVolumeEffects = effects;
+}
+
+function applySunLightSettings(scene, mapId, placement) {
+  const object = createSunLightObject(placement);
+  scene.add(object);
+  permanentOverrideObjects.push(object);
+  permanentSunLights.push(object);
+  registerEditableObject({
+    id: `permanent_${placement.id}`,
+    type: 'sunLight',
+    category: 'placed-sun',
+    mapId,
+    floor: placement.floor || 'ground',
+    zone: placement.zone || 'permanent_editor',
+    object3D: object,
+    materialTarget: object,
+    supportsTexture: false,
+    supportsTransform: true,
+    source: 'permanent-editor'
+  });
+  return object;
 }
 
 export async function loadPermanentEditorOverrides({ scene, mapId }) {
@@ -163,6 +208,7 @@ export async function loadPermanentEditorOverrides({ scene, mapId }) {
   const images = new Map(imageList.map((image) => [image.id, image]));
   const models = new Map(modelList.map((model) => [model.id, model]));
   const loadedTextures = new Map();
+  permanentMapSettings = data.mapSettings || null;
 
   for (const edit of data.surfaceEdits || []) {
     const meta = getEditableObject(edit.targetId);
@@ -244,6 +290,30 @@ export async function loadPermanentEditorOverrides({ scene, mapId }) {
     }
   }
 
+  const liquidVolumes = data.placedLiquidVolumes || (data.placedObjects || []).filter((placement) => placement.objectType === 'liquid');
+  for (const placement of liquidVolumes) {
+    try {
+      const object = createLiquidVolumeObject(placement);
+      updateVolumeVisual(object, placement);
+      registerPermanentObject({ scene, mapId, placement, object, type: 'liquid', supportsTexture: true });
+      permanentVolumeEffects.push({ ...placement, type: 'liquid', objectType: 'liquid' });
+    } catch (error) {
+      console.warn(`[Rule Beast] editor liquid failed: ${placement.id}`, error.message);
+    }
+  }
+
+  const gasVolumes = data.placedGasVolumes || (data.placedObjects || []).filter((placement) => placement.objectType === 'gas');
+  for (const placement of gasVolumes) {
+    try {
+      const object = createGasVolumeObject(placement);
+      updateVolumeVisual(object, placement);
+      registerPermanentObject({ scene, mapId, placement, object, type: 'gas', supportsTexture: false });
+      permanentVolumeEffects.push({ ...placement, type: 'gas', objectType: 'gas' });
+    } catch (error) {
+      console.warn(`[Rule Beast] editor gas/fog failed: ${placement.id}`, error.message);
+    }
+  }
+
   for (const marker of data.spawnMarkers || []) {
     const object = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.9, 5), new THREE.MeshBasicMaterial({ color: marker.spawnRole === 'monster' ? 0xff3658 : 0x75f6ff }));
     applyTransform(object, marker);
@@ -262,6 +332,14 @@ export async function loadPermanentEditorOverrides({ scene, mapId }) {
     light.position.set(lightInfo.position?.x || lightInfo.x || 0, lightInfo.position?.y || lightInfo.y || 2.5, lightInfo.position?.z || lightInfo.z || 0);
     scene.add(light);
     permanentOverrideObjects.push(light);
+  }
+
+  for (const sun of data.sunLights || []) {
+    try {
+      applySunLightSettings(scene, mapId, sun);
+    } catch (error) {
+      console.warn(`[Rule Beast] editor sun/main light failed: ${sun.id}`, error.message);
+    }
   }
 
   if (data.packageType === 'newMap' && (!(data.spawnMarkers || []).length || !(data.puzzleStationMarkers || []).length)) {

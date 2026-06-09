@@ -1,3 +1,5 @@
+import { DEFAULT_MAP_SETTINGS } from './volumeObjects.js';
+
 export const EDITOR_DRAFT_STORAGE_KEY = 'ruleBeastEditorDraftV1';
 export const EDITOR_VERSION = 1;
 
@@ -8,6 +10,7 @@ export class EditorState {
     this.models = [];
     this.surfaceEdits = [];
     this.placedModels = [];
+    this.mapSettings = { ...DEFAULT_MAP_SETTINGS };
     this.packageType = 'updateExistingMap';
     this.packageMapId = '';
     this.packageDisplayName = '';
@@ -71,6 +74,17 @@ export class EditorState {
     this.packageDisplayName = settings.displayName || this.packageDisplayName || '';
   }
 
+  updateMapSettings(settings = {}) {
+    this.mapSettings = {
+      ...DEFAULT_MAP_SETTINGS,
+      ...(this.mapSettings || {}),
+      gravityMultiplier: Number(settings.gravityMultiplier ?? this.mapSettings?.gravityMultiplier ?? DEFAULT_MAP_SETTINGS.gravityMultiplier),
+      airControl: Number(settings.airControl ?? this.mapSettings?.airControl ?? DEFAULT_MAP_SETTINGS.airControl),
+      drag: Number(settings.drag ?? this.mapSettings?.drag ?? DEFAULT_MAP_SETTINGS.drag)
+    };
+    return this.mapSettings;
+  }
+
   upsertSurfaceEdit(edit) {
     const next = {
       brightness: 1,
@@ -108,6 +122,7 @@ export class EditorState {
       models: this.models.map(stripRuntimeModel),
       surfaceEdits: this.surfaceEdits,
       placedModels: this.placedModels.map(stripRuntimePlacement),
+      mapSettings: { ...DEFAULT_MAP_SETTINGS, ...(this.mapSettings || {}) },
       warnings: this.warnings
     };
   }
@@ -135,6 +150,7 @@ export class EditorState {
     this.packageType = draft.packageType || 'updateExistingMap';
     this.packageMapId = draft.packageMapId || draft.mapId || '';
     this.packageDisplayName = draft.packageDisplayName || '';
+    this.mapSettings = { ...DEFAULT_MAP_SETTINGS, ...(draft.mapSettings || {}) };
     this.warnings = draft.warnings || [];
     this.lastSavedAt = draft.savedAt || null;
     this.warn('Draft loaded. Local texture/model files are not stored; re-upload them to preview.');

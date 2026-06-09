@@ -6,6 +6,16 @@ import { buildEditorExport, downloadEditorJson, stringifyEditorExport } from './
 import { buildCodexPackage, downloadCodexPackage } from './editorPackage.js';
 import { SHAPE_CATEGORIES, SHAPE_LIBRARY, createShapeObject, getShapeDefinition } from './shapeLibrary.js';
 import {
+  GAS_TYPES,
+  LIQUID_TYPES,
+  createGasVolumeObject,
+  createLiquidVolumeObject,
+  createSunLightObject,
+  gasDefaults,
+  liquidDefaults,
+  updateVolumeVisual
+} from './volumeObjects.js';
+import {
   getEditableObject,
   getEditableObjects,
   getSelectedEditableObject,
@@ -23,6 +33,7 @@ const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
 const TEXTURE_MIMES = ['image/png', 'image/jpeg', 'image/webp'];
 const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const GLB_MIMES = ['model/gltf-binary', 'application/octet-stream', ''];
+const SUN_DEFAULT = { color: '#fff4cc', intensity: 1.2, ambientBoost: 0.25, shadows: true, enabled: true, target: { x: 0, y: 0, z: 0 } };
 const MIN_SCALE = 0.1;
 const EDITOR_MOVE_STEP = 0.5;
 const EDITOR_VERTICAL_MOVE_STEP = 0.5;
@@ -37,6 +48,13 @@ const nextId = (prefix, list) => `${prefix}_${String(list.length + 1).padStart(3
 const repoPath = (folder, name) => `assets/${folder}/${name.replace(/[^a-z0-9._-]/gi, '_')}`;
 const clampBrightness = (brightness = 1) => THREE.MathUtils.clamp(Number(brightness) || 1, 0.25, 2.5);
 const toPlainVector = (v) => ({ x: Number(v.x.toFixed(3)), y: Number(v.y.toFixed(3)), z: Number(v.z.toFixed(3)) });
+const isSupportedMime = (file, allowed) => !file?.type || allowed.includes(file.type);
+const mergeSettings = (base = {}, patch = {}) => ({
+  ...base,
+  ...patch,
+  visual: { ...(base.visual || {}), ...(patch.visual || {}) },
+  gameplay: { ...(base.gameplay || {}), ...(patch.gameplay || {}) }
+});
 
 export function initAssetEditor(options) {
   return new AssetEditor(options);
@@ -69,6 +87,11 @@ function cloneMaterialValue(material) {
 function assignMaterial(target, materials) {
   if (Array.isArray(target.material)) target.material = materials;
   else target.material = materials[0] || target.material;
+}
+
+function stripPlacementForCopy(placement) {
+  const { object3D, collisionHelper, animationMixer, animationAction, ...rest } = placement;
+  return rest;
 }
 
 function ensureEditableMaterials(target) {
@@ -119,6 +142,7 @@ class AssetEditor {
     this.editorKeys = new Set();
     this.animationMixers = new Map();
     this.collisionHelpersVisible = false;
+    this.collisionEditMode = false;
     this.collisionHelperGroup = new THREE.Group();
     this.collisionHelperGroup.name = 'editor-collision-helpers';
     this.options.scene.add(this.collisionHelperGroup);
@@ -139,6 +163,13 @@ class AssetEditor {
       selectModel: (id) => this.selectModel(id),
       removeModel: (id) => this.removeModel(id),
       selectShape: (id) => this.selectShape(id),
+      placeLiquid: (type) => this.placeLiquidVolume(type),
+      placeGas: (type) => this.placeGasVolume(type),
+      placeSun: () => this.placeSunLight(),
+      updateLiquidSettings: (settings) => this.updateSelectedLiquidSettings(settings),
+      updateGasSettings: (settings) => this.updateSelectedGasSettings(settings),
+      updateSunSettings: (settings) => this.updateSelectedSunSettings(settings),
+      updateMapSettings: (settings) => this.updateMapSettings(settings),
       placeMarker: (kind) => this.placeMapMarker(kind),
       selectPlacedModel: (id) => this.selectPlacedModel(id),
       updatePackageSettings: (settings) => this.updatePackageSettings(settings),
@@ -157,8 +188,12 @@ class AssetEditor {
       exportJson: () => this.exportJson(),
       exportCodexPackage: () => this.exportCodexPackage(),
       toggleCollision: () => this.toggleSelectedObjectCollision(),
-      toggleCollisionHelpers: () => this.toggleCollisionHelpers()
+      toggleCollisionHelpers: () => this.toggleCollisionHelpers(),
+      editCollisionBox: () => this.enterCollisionEditMode(),
+      returnObjectEditing: () => this.returnToObjectEditing(),
+      resetCollisionBox: () => this.resetSelectedCollisionBoxToObjectBounds()
     });
+    this.ui.setVolumeOptions?.(LIQUID_TYPES, GAS_TYPES);
     options.renderer.domElement.addEventListener('pointerdown', (event) => this.handleCanvasPointerDown(event), true);
     options.renderer.domElement.addEventListener('dragover', (event) => this.handleCanvasDragOver(event), true);
     options.renderer.domElement.addEventListener('drop', (event) => this.handleCanvasDrop(event), true);
@@ -186,6 +221,12 @@ class AssetEditor {
       displayName: this.currentMapName()
     });
     this.refreshObjects();
+  }
+
+  updateMapSettings(settings = {}) {
+    this.state.updateMapSettings(settings);
+    this.refreshObjects();
+    this.log(`Map gravity multiplier: ${this.state.mapSettings.gravityMultiplier}`);
   }
 
   startMapMakerSession(settings = {}) {
@@ -270,7 +311,10 @@ class AssetEditor {
     if (selectedModel && MODEL_KEY_CODES.includes(code)) {
       event.preventDefault();
       event.stopPropagation();
-      if (pressed) this.handleSelectedModelKey(code);
+      if (pressed) {
+        if (event.ctrlKey && code === 'KeyC') this.copySelectedObject();
+        else this.handleSelectedModelKey(code);
+      }
       return true;
     }
 
@@ -463,7 +507,8 @@ class AssetEditor {
   validateTexture(file) {
     if (!file) throw new Error('Choose a texture file first.');
     const lower = file.name.toLowerCase();
-    if (!TEXTURE_EXTENSIONS.some((ext) => lower.endsWith(ext)) || !TEXTURE_MIMES.includes(file.type)) throw new Error('Use png, jpg, jpeg, or webp textures.');
+    if (!TEXTURE_EXTENSIONS.some((ext) => lower.endsWith(ext))) throw new Error(`Unsupported texture type for ${file.name}. Use png, jpg, jpeg, or webp textures.`);
+    isSupportedMime(file, TEXTURE_MIMES);
   }
 
   async importTexture(file) {
@@ -476,7 +521,7 @@ class AssetEditor {
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.RepeatWrapping;
       texture.colorSpace = THREE.SRGBColorSpace;
-      const image = await this.loadImage(url).catch(() => null);
+      const image = await this.loadImageElement(url).catch(() => null);
       if (image && (image.naturalWidth > 2048 || image.naturalHeight > 2048)) warnings.push('Texture resolution is over 2048x2048.');
       const meta = this.state.addTexture({
         id: nextId('texture', this.state.textures),
@@ -505,7 +550,8 @@ class AssetEditor {
   validateImage(file) {
     if (!file) throw new Error('Choose an image or GIF file first.');
     const lower = file.name.toLowerCase();
-    if (!IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext)) || !IMAGE_MIMES.includes(file.type)) throw new Error('Use png, jpg, jpeg, webp, or gif images.');
+    if (!IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext))) throw new Error(`Unsupported image type for ${file.name}. Use png, jpg, jpeg, webp, or gif images.`);
+    isSupportedMime(file, IMAGE_MIMES);
   }
 
   async importImage(file) {
@@ -516,10 +562,10 @@ class AssetEditor {
       const isGif = lower.endsWith('.gif') || file.type === 'image/gif';
       const warnings = [];
       if (file.size > 8 * 1024 * 1024) warnings.push('Image/GIF is over 8 MB.');
-      if (isGif) warnings.push('GIFs display as static image planes in this version.');
+      if (isGif) warnings.push('GIF loaded as static image in this version. GIFs display as static image planes in this version.');
       const texture = await this.loadTexture(url);
       texture.colorSpace = THREE.SRGBColorSpace;
-      const imageElement = await this.loadImage(url).catch(() => null);
+      const imageElement = await this.loadImageElement(url).catch(() => null);
       const meta = this.state.addImage({
         id: nextId(isGif ? 'gifAsset' : 'imageAsset', this.state.images),
         name: file.name,
@@ -551,18 +597,19 @@ class AssetEditor {
     });
   }
 
-  loadImage(url) {
+  loadImageElement(url) {
     return new Promise((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve(image);
-      image.onerror = reject;
+      image.onerror = () => reject(new Error('Image file loading failed.'));
       image.src = url;
     });
   }
 
   validateGlb(file) {
     if (!file) throw new Error('Choose a GLB file first.');
-    if (!file.name.toLowerCase().endsWith('.glb') || !GLB_MIMES.includes(file.type)) throw new Error('Use .glb model files only.');
+    if (!file.name.toLowerCase().endsWith('.glb')) throw new Error(`Unsupported model type for ${file.name}. Use .glb model files only.`);
+    isSupportedMime(file, GLB_MIMES);
   }
 
   async importModel(file) {
@@ -620,12 +667,16 @@ class AssetEditor {
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.mouse, this.options.camera);
-    const objects = getEditableObjects().map((meta) => meta.object3D);
+    const objects = [
+      ...getEditableObjects().map((meta) => meta.object3D),
+      ...(this.collisionHelpersVisible ? this.collisionHelperGroup.children : [])
+    ];
     const hit = this.raycaster.intersectObjects(objects, true)[0];
     if (!hit) return { point: null, meta: null };
     let object = hit.object;
     while (object && !object.userData.editableId) object = object.parent;
-    return { point: hit.point, meta: object?.userData.editableId ? getEditableObject(object.userData.editableId) : null };
+    const meta = object?.userData.editableId ? getEditableObject(object.userData.editableId) : null;
+    return { point: hit.point, meta: object?.userData.collisionHelper && meta ? { ...meta, collisionHelper: true } : meta };
   }
 
   handleCanvasPointerDown(event) {
@@ -640,6 +691,7 @@ class AssetEditor {
     if (this.toolMode === 'place') return this.placeSelectedAssetAtPoint(target.point);
     if (target.meta) {
       selectEditableObject(target.meta.id);
+      if (target.meta.collisionHelper) this.enterCollisionEditMode();
       if (target.meta.supportsTransform) this.setToolMode('edit');
       this.refreshObjects();
     } else if (this.toolMode === 'select') {
@@ -824,6 +876,12 @@ class AssetEditor {
   updatePlacementCollision(placement, object = placement?.object3D) {
     if (!placement || !object) return;
     const enabled = placement.collision?.enabled !== false;
+    if (placement.collision?.manual) {
+      placement.collision.enabled = enabled;
+      this.state.updatePlacedModel(placement.id, { collision: placement.collision });
+      this.refreshCollisionHelpers();
+      return;
+    }
     placement.collision = this.collisionFromObject(object, enabled);
     this.state.updatePlacedModel(placement.id, { collision: placement.collision });
     this.refreshCollisionHelpers();
@@ -848,11 +906,79 @@ class AssetEditor {
     this.collisionHelperGroup.clear();
     if (!this.collisionHelpersVisible) return;
     this.state.placedModels.forEach((placement) => {
-      if (!placement.collision?.enabled || !placement.object3D) return;
-      const helper = new THREE.BoxHelper(placement.object3D, 0x75f6ff);
+      if (!placement.collision || !placement.object3D) return;
+      const size = placement.collision.size || { x: 1, y: 1, z: 1 };
+      const offset = placement.collision.offset || { x: 0, y: 0, z: 0 };
+      const color = placement.id === getSelectedEditableObject()?.id && this.collisionEditMode
+        ? 0xd8ff50
+        : placement.collision.enabled
+          ? 0x20ff66
+          : 0x8a3232;
+      const helper = new THREE.Mesh(
+        new THREE.BoxGeometry(Math.max(0.05, size.x || 1), Math.max(0.05, size.y || 1), Math.max(0.05, size.z || 1)),
+        new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: placement.collision.enabled ? 0.82 : 0.48, depthTest: false })
+      );
+      helper.position.set(
+        (placement.position?.x || 0) + (offset.x || 0),
+        (placement.position?.y || 0) + (offset.y || 0),
+        (placement.position?.z || 0) + (offset.z || 0)
+      );
+      helper.rotation.set(placement.rotation?.x || 0, placement.rotation?.y || 0, placement.rotation?.z || 0);
       helper.userData.collisionHelper = true;
+      helper.userData.editableId = placement.id;
       this.collisionHelperGroup.add(helper);
     });
+  }
+
+  enterCollisionEditMode() {
+    const placement = this.selectedPlacement();
+    if (!placement) return this.log('Select an object with collision first.');
+    placement.collision ||= this.collisionFromObject(placement.object3D, true);
+    this.collisionEditMode = true;
+    this.collisionHelpersVisible = true;
+    this.refreshCollisionHelpers();
+    this.refreshObjects();
+    this.log('Editing: Collision Box');
+  }
+
+  returnToObjectEditing() {
+    this.collisionEditMode = false;
+    this.refreshCollisionHelpers();
+    this.refreshObjects();
+    this.log('Editing: Visual Object');
+  }
+
+  resetSelectedCollisionBoxToObjectBounds() {
+    const placement = this.selectedPlacement();
+    if (!placement?.object3D) return this.log('Select an object first.');
+    placement.collision = this.collisionFromObject(placement.object3D, placement.collision?.enabled !== false);
+    delete placement.collision.manual;
+    this.state.updatePlacedModel(placement.id, { collision: placement.collision });
+    this.refreshCollisionHelpers();
+    this.refreshObjects();
+    this.log('Collision box reset to object bounds.');
+  }
+
+  updateCollisionFromHelper(placement, helper) {
+    const size = {
+      x: Number(Math.max(0.05, helper.scale.x * (placement.collision?.size?.x || 1)).toFixed(3)),
+      y: Number(Math.max(0.05, helper.scale.y * (placement.collision?.size?.y || 1)).toFixed(3)),
+      z: Number(Math.max(0.05, helper.scale.z * (placement.collision?.size?.z || 1)).toFixed(3))
+    };
+    const center = helper.position.clone();
+    const objectPos = placement.object3D?.position || new THREE.Vector3(placement.position?.x || 0, placement.position?.y || 0, placement.position?.z || 0);
+    const half = new THREE.Vector3(size.x / 2, size.y / 2, size.z / 2);
+    placement.collision = {
+      ...(placement.collision || {}),
+      enabled: placement.collision?.enabled !== false,
+      type: 'box',
+      manual: true,
+      size,
+      offset: toPlainVector(center.clone().sub(objectPos)),
+      min: toPlainVector(center.clone().sub(half)),
+      max: toPlainVector(center.clone().add(half))
+    };
+    this.state.updatePlacedModel(placement.id, { collision: placement.collision });
   }
 
   registerPlacement(placement, object, meta = {}) {
@@ -1021,6 +1147,138 @@ class AssetEditor {
     return placement;
   }
 
+  placeLiquidVolume(liquidType = 'water') {
+    const defaults = liquidDefaults(liquidType);
+    const position = this.placementPosition(null);
+    const placement = this.state.addPlacedModel({
+      id: nextId('placedLiquid', this.state.placedModels),
+      objectType: 'liquid',
+      type: 'liquid',
+      liquidType,
+      mapId: this.currentMapId(),
+      floor: this.floorFromY(position.y),
+      zone: 'editor_liquid_volume',
+      position: { x: position.x, y: Number((position.y + 0.15).toFixed(3)), z: position.z },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 5, y: 0.3, z: 4, uniform: 1 },
+      visual: defaults.visual,
+      gameplay: defaults.gameplay,
+      brightness: defaults.visual.brightness,
+      modelBrightness: defaults.visual.brightness,
+      supportsTexture: true,
+      collision: { enabled: false, volumeOnly: true, type: 'box', size: { x: 5, y: 0.3, z: 4 }, offset: { x: 0, y: 0, z: 0 } }
+    });
+    const object = createLiquidVolumeObject(placement);
+    this.options.scene.add(object);
+    this.registerPlacement(placement, object, { type: 'liquid', category: 'placed-liquid' });
+    this.log(`Placed liquid volume: ${liquidType}`);
+    return placement;
+  }
+
+  placeGasVolume(gasType = 'fog_cloud') {
+    const defaults = gasDefaults(gasType);
+    const position = this.placementPosition(null);
+    const placement = this.state.addPlacedModel({
+      id: nextId('placedGas', this.state.placedModels),
+      objectType: 'gas',
+      type: 'gas',
+      gasType,
+      mapId: this.currentMapId(),
+      floor: this.floorFromY(position.y),
+      zone: 'editor_gas_volume',
+      position: { x: position.x, y: Number((position.y + 1.5).toFixed(3)), z: position.z },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 5, y: 3, z: 5, uniform: 1 },
+      visual: defaults.visual,
+      gameplay: defaults.gameplay,
+      brightness: defaults.visual.brightness,
+      modelBrightness: defaults.visual.brightness,
+      supportsTexture: false,
+      collision: { enabled: false, volumeOnly: true, type: 'box', size: { x: 5, y: 3, z: 5 }, offset: { x: 0, y: 0, z: 0 } }
+    });
+    const object = createGasVolumeObject(placement);
+    this.options.scene.add(object);
+    this.registerPlacement(placement, object, { type: 'gas', category: 'placed-gas' });
+    this.log(`Placed gas/fog volume: ${gasType}`);
+    return placement;
+  }
+
+  placeSunLight() {
+    const existing = this.state.placedModels.find((placement) => placement.objectType === 'sunLight');
+    if (existing) {
+      selectEditableObject(existing.id);
+      this.refreshObjects();
+      return this.log('Sun/Main Light already exists; selected existing sun.');
+    }
+    const position = this.placementPosition(null);
+    const placement = this.state.addPlacedModel({
+      id: nextId('sunLight', this.state.placedModels),
+      objectType: 'sunLight',
+      type: 'sunLight',
+      mapId: this.currentMapId(),
+      floor: this.floorFromY(position.y),
+      zone: 'editor_sun_light',
+      position: { x: position.x + 8, y: position.y + 10, z: position.z + 4 },
+      rotation: { x: -0.6, y: 0.8, z: 0 },
+      scale: { x: 1, y: 1, z: 1, uniform: 1 },
+      ...SUN_DEFAULT,
+      brightness: SUN_DEFAULT.intensity,
+      modelBrightness: SUN_DEFAULT.intensity,
+      supportsTexture: false,
+      collision: { enabled: false, type: 'box', size: { x: 1, y: 1, z: 1 }, offset: { x: 0, y: 0, z: 0 } }
+    });
+    const object = createSunLightObject(placement);
+    this.options.scene.add(object);
+    this.registerPlacement(placement, object, { type: 'sunLight', category: 'placed-sun', supportsTexture: false });
+    this.updateSelectedSunSettings(SUN_DEFAULT);
+    this.log('Placed Sun / Main Light.');
+    return placement;
+  }
+
+  updateSelectedLiquidSettings(settings = {}) {
+    const placement = this.selectedPlacement();
+    if (placement?.objectType !== 'liquid') return;
+    const merged = mergeSettings(placement, settings);
+    this.state.updatePlacedModel(placement.id, { visual: merged.visual, gameplay: merged.gameplay });
+    placement.visual = merged.visual;
+    placement.gameplay = merged.gameplay;
+    updateVolumeVisual(placement.object3D, placement);
+    this.refreshObjects();
+  }
+
+  updateSelectedGasSettings(settings = {}) {
+    const placement = this.selectedPlacement();
+    if (placement?.objectType !== 'gas') return;
+    const merged = mergeSettings(placement, settings);
+    this.state.updatePlacedModel(placement.id, { visual: merged.visual, gameplay: merged.gameplay });
+    placement.visual = merged.visual;
+    placement.gameplay = merged.gameplay;
+    updateVolumeVisual(placement.object3D, placement);
+    this.refreshObjects();
+  }
+
+  updateSelectedSunSettings(settings = {}) {
+    const placement = this.selectedPlacement();
+    if (placement?.objectType !== 'sunLight') return;
+    const patch = { ...settings };
+    Object.assign(placement, patch);
+    const color = new THREE.Color(placement.color || SUN_DEFAULT.color);
+    const light = placement.object3D?.userData?.sunLight;
+    const orb = placement.object3D?.userData?.sunOrb;
+    if (light) {
+      light.color.copy(color);
+      light.intensity = placement.enabled === false ? 0 : Number(placement.intensity ?? SUN_DEFAULT.intensity);
+      light.castShadow = placement.shadows !== false;
+    }
+    if (orb?.material) {
+      orb.material.color.copy(color);
+      orb.material.opacity = placement.enabled === false ? 0.35 : 1;
+      orb.material.needsUpdate = true;
+    }
+    this.state.updatePlacedModel(placement.id, patch);
+    this.refreshObjects();
+  }
+
   placeMapMarker(kind = 'puzzle') {
     const position = this.placementPosition(null);
     let object = null;
@@ -1130,6 +1388,12 @@ class AssetEditor {
       const texture = asset.textureObject.clone();
       const aspect = asset.width && asset.height ? asset.width / asset.height : 1.4;
       object = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(0.6, aspect), 1), new THREE.MeshStandardMaterial({ map: texture, color: 0xffffff, transparent: true, side: THREE.DoubleSide }));
+    } else if (placement.objectType === 'liquid') {
+      object = createLiquidVolumeObject(placement);
+    } else if (placement.objectType === 'gas') {
+      object = createGasVolumeObject(placement);
+    } else if (placement.objectType === 'sunLight') {
+      object = createSunLightObject(placement);
     } else {
       if (!asset?.loadedScene) return false;
       object = this.cloneModelScene(asset.loadedScene);
@@ -1152,6 +1416,7 @@ class AssetEditor {
       source: 'editor-import'
     });
     if (placement.objectType === 'model') this.setupPlacementAnimation(placement, asset);
+    if (placement.objectType === 'sunLight') this.updateSelectedSunSettings(placement);
     this.applyModelBrightness(placement, placement.modelBrightness || placement.brightness || 1);
     this.updatePlacementCollision(placement, object);
     return true;
@@ -1163,6 +1428,19 @@ class AssetEditor {
     if (!placement || !meta?.object3D) {
       this.log('Select a placed object first.');
       return null;
+    }
+    if (this.collisionEditMode) {
+      this.collisionHelpersVisible = true;
+      this.refreshCollisionHelpers();
+      const helper = this.collisionHelperGroup.children.find((child) => child.userData.editableId === placement.id);
+      if (!helper) return null;
+      mutator(helper, placement);
+      helper.scale.set(Math.max(MIN_SCALE, helper.scale.x), Math.max(MIN_SCALE, helper.scale.y), Math.max(MIN_SCALE, helper.scale.z));
+      helper.updateMatrixWorld(true);
+      this.updateCollisionFromHelper(placement, helper);
+      this.refreshCollisionHelpers();
+      this.refreshObjects();
+      return placement;
     }
     mutator(meta.object3D, placement);
     meta.object3D.scale.set(
@@ -1255,8 +1533,9 @@ class AssetEditor {
     object.rotation.set(placement.rotation.x, placement.rotation.y, placement.rotation.z);
     object.scale.set(placement.scale.x, placement.scale.y, placement.scale.z);
     this.options.scene.add(object);
+    const placementCopy = JSON.parse(JSON.stringify(stripPlacementForCopy(placement)));
     const duplicate = this.state.addPlacedModel({
-      ...placement,
+      ...placementCopy,
       id: nextId(`duplicate_${placement.objectType || 'object'}`, this.state.placedModels),
       position: toPlainVector(object.position),
       object3D: object
@@ -1268,6 +1547,10 @@ class AssetEditor {
     this.registerPlacement(duplicate, object);
     this.applyModelBrightness(duplicate, duplicate.modelBrightness || duplicate.brightness || 1);
     this.log(`Duplicated ${placement.id}`);
+  }
+
+  copySelectedObject() {
+    return this.duplicateSelectedModel();
   }
 
   deleteSelectedModel() {
@@ -1297,6 +1580,7 @@ class AssetEditor {
         objectType: placement?.objectType || 'model',
         collision: placement?.collision,
         animation: placement?.animation,
+        editingCollision: this.collisionEditMode,
         brightness: placement?.modelBrightness || placement?.brightness || 1
       });
       this.ui.setModelControlValues(placement);

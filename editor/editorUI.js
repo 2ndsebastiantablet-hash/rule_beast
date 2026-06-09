@@ -221,12 +221,15 @@ export class EditorUI {
         </section>
 
         <section class="editor-section">
-          <h3>Uploads</h3>
+          <h3>Asset Uploads</h3>
           <label>Textures <input id="editor-texture-file" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"></label>
+          <div class="editor-note">My Textures</div>
           <div class="editor-list" id="editor-texture-list"></div>
           <label>Images / GIFs <input id="editor-image-file" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif"></label>
+          <div class="editor-note">My Images/GIFs</div>
           <div class="editor-list" id="editor-image-list"></div>
           <label>GLB Models <input id="editor-model-file" type="file" accept=".glb,model/gltf-binary"></label>
+          <div class="editor-note">My Models</div>
           <div class="editor-list" id="editor-model-list"></div>
         </section>
 
@@ -247,8 +250,76 @@ export class EditorUI {
         </section>
 
         <section class="editor-section">
+          <h3>Liquids</h3>
+          <div class="editor-input-grid">
+            <label>Liquid Type <select id="editor-liquid-type"></select></label>
+            <label>Color <input id="editor-liquid-color" type="color" value="#2f9bff"></label>
+            <label>Opacity <input id="editor-liquid-opacity" type="number" min="0.05" max="1" step="0.05" value="0.5"></label>
+            <label>Damage / sec <input id="editor-liquid-damage" type="number" min="0" step="1" value="0"></label>
+            <label>Movement Multiplier <input id="editor-liquid-movement" type="number" min="0.05" max="1" step="0.05" value="0.8"></label>
+            <label>Sink Speed <input id="editor-liquid-sink-speed" type="number" min="0" step="0.05" value="0"></label>
+          </div>
+          <div class="editor-actions">
+            <button id="editor-place-liquid">Place Liquid</button>
+            <button id="editor-liquid-hurts" class="secondary">Hurts OFF</button>
+            <button id="editor-liquid-instant" class="secondary">Instant Kill OFF</button>
+            <button id="editor-liquid-sink" class="secondary">Sink OFF</button>
+            <button id="editor-liquid-slime" class="secondary">Slime OFF</button>
+          </div>
+          <div class="editor-note">Liquid Settings: volumes are enterable by default and use simple box checks.</div>
+        </section>
+
+        <section class="editor-section">
+          <h3>Gas/Fog Settings</h3>
+          <div class="editor-input-grid">
+            <label>Gas / Fog Type <select id="editor-gas-type"></select></label>
+            <label>Color <input id="editor-gas-color" type="color" value="#dfe8ef"></label>
+            <label>Opacity <input id="editor-gas-opacity" type="number" min="0.02" max="1" step="0.05" value="0.25"></label>
+            <label>Density <input id="editor-gas-density" type="number" min="0" max="2" step="0.05" value="0.5"></label>
+            <label>Damage / sec <input id="editor-gas-damage" type="number" min="0" step="1" value="0"></label>
+            <label>Movement Multiplier <input id="editor-gas-movement" type="number" min="0.05" max="1.5" step="0.05" value="1"></label>
+            <label>Gravity Multiplier <input id="editor-gas-gravity" type="number" min="0" max="4" step="0.05" value="1"></label>
+            <label>Upward Force <input id="editor-gas-upward" type="number" min="0" step="0.05" value="0"></label>
+            <label>Downward Force <input id="editor-gas-downward" type="number" min="0" step="0.05" value="0"></label>
+          </div>
+          <div class="editor-actions">
+            <button id="editor-place-gas">Place Gas / Fog</button>
+            <button id="editor-gas-hurts" class="secondary">Hurts OFF</button>
+            <button id="editor-gas-instant" class="secondary">Instant Kill OFF</button>
+            <button id="editor-gas-vision" class="secondary">Vision OFF</button>
+            <button id="editor-gas-affects-gravity" class="secondary">Gravity OFF</button>
+          </div>
+        </section>
+
+        <section class="editor-section">
+          <h3>Map Settings</h3>
+          <div class="editor-input-grid">
+            <label>Gravity Preset <select id="editor-map-gravity-preset"><option value="1">Normal gravity</option><option value="0.45">Low gravity</option><option value="1.8">Heavy gravity</option><option value="0.05">Zero gravity-ish</option></select></label>
+            <label>gravityMultiplier <input id="editor-map-gravity" type="number" min="0" max="4" step="0.05" value="1"></label>
+            <label>Air Control <input id="editor-map-air-control" type="number" min="0" max="3" step="0.05" value="1"></label>
+            <label>Drag <input id="editor-map-drag" type="number" min="0" max="3" step="0.05" value="1"></label>
+          </div>
+        </section>
+
+        <section class="editor-section">
+          <h3>Sun / Main Light</h3>
+          <div class="editor-note">The Sun/Main Light is the main map light source. Use brightness/color to control the map mood.</div>
+          <div class="editor-input-grid">
+            <label>Color <input id="editor-sun-color" type="color" value="#fff4cc"></label>
+            <label>Brightness <input id="editor-sun-intensity" type="number" min="0" max="6" step="0.1" value="1.2"></label>
+            <label>Ambient Boost <input id="editor-sun-ambient" type="number" min="0" max="2" step="0.05" value="0.25"></label>
+          </div>
+          <div class="editor-actions">
+            <button id="editor-add-sun">Add Sun</button>
+            <button id="editor-sun-shadows" class="secondary">Shadows ON</button>
+          </div>
+        </section>
+
+        <section class="editor-section">
           <h3>Selected Object</h3>
           <div class="editor-selected-info" id="editor-selected-info">Selected: none</div>
+          <div class="editor-note" id="editor-editing-status">Editing: Visual Object / Collision: OFF</div>
+          <div class="editor-note">Modes: Editing: Visual Object / Editing: Collision Box</div>
           <label>Brightness <input id="editor-brightness" type="range" min="0.25" max="2.5" step="0.05" value="1"></label>
           <div class="editor-input-grid" id="editor-surface-controls">
             <label>Repeat X <input id="editor-repeat-x" type="number" step="0.1" min="0.1" value="1"></label>
@@ -261,6 +332,9 @@ export class EditorUI {
           <div class="editor-actions">
             <button id="editor-toggle-collision">Collision ON/OFF</button>
             <button id="editor-toggle-collision-helpers" class="secondary">Show Collision Boxes</button>
+            <button id="editor-edit-collision-box" class="secondary">Edit Collision Box</button>
+            <button id="editor-return-object-editing" class="secondary">Return To Object Editing</button>
+            <button id="editor-reset-collision-box" class="secondary">Reset Collision Box To Object Bounds</button>
             <button id="editor-duplicate-model">Duplicate</button>
             <button id="editor-delete-model" class="danger">Delete</button>
           </div>
@@ -300,10 +374,10 @@ export class EditorUI {
           <div class="editor-help">
             Status labels show Editor Mode: ON, Fly Mode: ON, Collision ON/OFF, current tool, and selected object/model id.
             Editor Fly Controls: W/A/S/D = fly around, Space = fly up, Shift/Ctrl = fly down, C = toggle editor collision when nothing is selected.
-            Selected Model Controls / Selected Object Controls: A left, D right, S forward, W backward, Q bigger, E smaller, R taller, F shorter, Z wider, X narrower, T deeper, G thinner, Arrow Up/Down height, Arrow Left/Right rotate, Delete removes, Esc clears selection.
+            Selected Model Controls / Selected Object Controls: A left, D right, S forward, W backward, Q bigger, E smaller, R taller, F shorter, Z wider, X narrower, T deeper, G thinner, Arrow Up/Down height, Arrow Left/Right rotate, Ctrl+C copies, Delete removes, Esc clears selection.
             Upload a texture, then drag it onto a wall/floor/object or click a selected surface with Apply Selected Texture.
             Upload an image/GIF to place a flat billboard. GIFs display as static image planes in this version.
-            Shape Library objects and imported GLBs use simple box collision by default; image/GIF planes default collision OFF.
+            Shape Library objects and imported GLBs use simple box collision by default; image/GIF planes default collision OFF. Collision boxes are green when ON and gray/red when OFF.
             Export Editor JSON = quick metadata export. Export Codex Package = full package for Codex with manifest + assets.
             To make permanent: put ZIP in editor_imports/inbox and ask Codex to import it.
           </div>
@@ -328,9 +402,9 @@ export class EditorUI {
     q('#editor-close').addEventListener('click', () => this.callbacks.close?.());
     q('#editor-toggle-collision').addEventListener('click', () => this.callbacks.toggleCollision?.());
     q('#editor-toggle-collision-helpers').addEventListener('click', () => this.callbacks.toggleCollisionHelpers?.());
-    q('#editor-texture-file').addEventListener('change', (event) => this.callbacks.importTexture?.(event.target.files?.[0]));
-    q('#editor-image-file').addEventListener('change', (event) => this.callbacks.importImage?.(event.target.files?.[0]));
-    q('#editor-model-file').addEventListener('change', (event) => this.callbacks.importModel?.(event.target.files?.[0]));
+    q('#editor-texture-file').addEventListener('change', async (event) => { await this.callbacks.importTexture?.(event.target.files?.[0]); this.resetFileInput(event.target); });
+    q('#editor-image-file').addEventListener('change', async (event) => { await this.callbacks.importImage?.(event.target.files?.[0]); this.resetFileInput(event.target); });
+    q('#editor-model-file').addEventListener('change', async (event) => { await this.callbacks.importModel?.(event.target.files?.[0]); this.resetFileInput(event.target); });
     q('#editor-brightness').addEventListener('input', (event) => this.callbacks.changeBrightness?.(Number(event.target.value)));
     q('#editor-repeat-x').addEventListener('input', () => this.callbacks.updateSurfaceRepeat?.(this.surfaceRepeat()));
     q('#editor-repeat-y').addEventListener('input', () => this.callbacks.updateSurfaceRepeat?.(this.surfaceRepeat()));
@@ -338,6 +412,37 @@ export class EditorUI {
     q('#editor-reset-surface').addEventListener('click', () => this.callbacks.resetSurface?.());
     q('#editor-duplicate-model').addEventListener('click', () => this.callbacks.duplicateModel?.());
     q('#editor-delete-model').addEventListener('click', () => this.callbacks.deleteModel?.());
+    q('#editor-edit-collision-box').addEventListener('click', () => this.callbacks.editCollisionBox?.());
+    q('#editor-return-object-editing').addEventListener('click', () => this.callbacks.returnObjectEditing?.());
+    q('#editor-reset-collision-box').addEventListener('click', () => this.callbacks.resetCollisionBox?.());
+    q('#editor-place-liquid').addEventListener('click', () => this.callbacks.placeLiquid?.(q('#editor-liquid-type').value));
+    q('#editor-place-gas').addEventListener('click', () => this.callbacks.placeGas?.(q('#editor-gas-type').value));
+    q('#editor-add-sun').addEventListener('click', () => this.callbacks.placeSun?.());
+    q('#editor-liquid-hurts').addEventListener('click', () => this.toggleButtonSetting('#editor-liquid-hurts', 'Hurts', (value) => this.callbacks.updateLiquidSettings?.({ gameplay: { hurtsPlayer: value } })));
+    q('#editor-liquid-instant').addEventListener('click', () => this.toggleButtonSetting('#editor-liquid-instant', 'Instant Kill', (value) => this.callbacks.updateLiquidSettings?.({ gameplay: { instantKill: value } })));
+    q('#editor-liquid-sink').addEventListener('click', () => this.toggleButtonSetting('#editor-liquid-sink', 'Sink', (value) => this.callbacks.updateLiquidSettings?.({ gameplay: { sinkEnabled: value } })));
+    q('#editor-liquid-slime').addEventListener('click', () => this.toggleButtonSetting('#editor-liquid-slime', 'Slime', (value) => this.callbacks.updateLiquidSettings?.({ gameplay: { isSlime: value } })));
+    q('#editor-gas-hurts').addEventListener('click', () => this.toggleButtonSetting('#editor-gas-hurts', 'Hurts', (value) => this.callbacks.updateGasSettings?.({ gameplay: { hurtsPlayer: value } })));
+    q('#editor-gas-instant').addEventListener('click', () => this.toggleButtonSetting('#editor-gas-instant', 'Instant Kill', (value) => this.callbacks.updateGasSettings?.({ gameplay: { instantKill: value } })));
+    q('#editor-gas-vision').addEventListener('click', () => this.toggleButtonSetting('#editor-gas-vision', 'Vision', (value) => this.callbacks.updateGasSettings?.({ gameplay: { affectsVision: value } })));
+    q('#editor-gas-affects-gravity').addEventListener('click', () => this.toggleButtonSetting('#editor-gas-affects-gravity', 'Gravity', (value) => this.callbacks.updateGasSettings?.({ gameplay: { affectsGravity: value } })));
+    q('#editor-sun-shadows').addEventListener('click', () => this.toggleButtonSetting('#editor-sun-shadows', 'Shadows', (value) => this.callbacks.updateSunSettings?.({ shadows: value })));
+    ['#editor-liquid-color', '#editor-liquid-opacity', '#editor-liquid-damage', '#editor-liquid-movement', '#editor-liquid-sink-speed'].forEach((selector) => {
+      q(selector).addEventListener('input', () => this.callbacks.updateLiquidSettings?.(this.liquidSettings()));
+    });
+    ['#editor-gas-color', '#editor-gas-opacity', '#editor-gas-density', '#editor-gas-damage', '#editor-gas-movement', '#editor-gas-gravity', '#editor-gas-upward', '#editor-gas-downward'].forEach((selector) => {
+      q(selector).addEventListener('input', () => this.callbacks.updateGasSettings?.(this.gasSettings()));
+    });
+    ['#editor-sun-color', '#editor-sun-intensity', '#editor-sun-ambient'].forEach((selector) => {
+      q(selector).addEventListener('input', () => this.callbacks.updateSunSettings?.(this.sunSettings()));
+    });
+    ['#editor-map-gravity', '#editor-map-air-control', '#editor-map-drag'].forEach((selector) => {
+      q(selector).addEventListener('input', () => this.callbacks.updateMapSettings?.(this.mapSettings()));
+    });
+    q('#editor-map-gravity-preset').addEventListener('change', (event) => {
+      q('#editor-map-gravity').value = event.target.value;
+      this.callbacks.updateMapSettings?.(this.mapSettings());
+    });
     q('#editor-save-draft').addEventListener('click', () => this.callbacks.saveDraft?.());
     q('#editor-load-draft').addEventListener('click', () => this.callbacks.loadDraft?.());
     q('#editor-clear-draft').addEventListener('click', () => this.callbacks.clearDraft?.());
@@ -394,6 +499,76 @@ export class EditorUI {
       event.dataTransfer?.setData('application/x-rule-beast-editor', JSON.stringify(payload));
       event.dataTransfer?.setData('text/plain', `${payload.kind}:${payload.id}`);
     });
+  }
+
+  resetFileInput(input) {
+    if (input) input.value = '';
+  }
+
+  toggleButtonSetting(selector, label, callback) {
+    const button = this.root.querySelector(selector);
+    const next = button.dataset.enabled !== 'true';
+    button.dataset.enabled = String(next);
+    button.textContent = `${label} ${next ? 'ON' : 'OFF'}`;
+    callback?.(next);
+  }
+
+  setVolumeOptions(liquidTypes = [], gasTypes = []) {
+    const liquidSelect = this.root.querySelector('#editor-liquid-type');
+    const gasSelect = this.root.querySelector('#editor-gas-type');
+    if (liquidSelect && !liquidSelect.options.length) liquidSelect.innerHTML = liquidTypes.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+    if (gasSelect && !gasSelect.options.length) gasSelect.innerHTML = gasTypes.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+  }
+
+  liquidSettings() {
+    const q = (selector) => this.root.querySelector(selector);
+    return {
+      visual: {
+        color: q('#editor-liquid-color').value,
+        opacity: Number(q('#editor-liquid-opacity').value || 0.5)
+      },
+      gameplay: {
+        damagePerSecond: Number(q('#editor-liquid-damage').value || 0),
+        movementMultiplier: Number(q('#editor-liquid-movement').value || 0.8),
+        sinkSpeed: Number(q('#editor-liquid-sink-speed').value || 0)
+      }
+    };
+  }
+
+  gasSettings() {
+    const q = (selector) => this.root.querySelector(selector);
+    return {
+      visual: {
+        color: q('#editor-gas-color').value,
+        opacity: Number(q('#editor-gas-opacity').value || 0.25),
+        density: Number(q('#editor-gas-density').value || 0.5)
+      },
+      gameplay: {
+        damagePerSecond: Number(q('#editor-gas-damage').value || 0),
+        movementMultiplier: Number(q('#editor-gas-movement').value || 1),
+        gravityMultiplier: Number(q('#editor-gas-gravity').value || 1),
+        upwardForce: Number(q('#editor-gas-upward').value || 0),
+        downwardForce: Number(q('#editor-gas-downward').value || 0)
+      }
+    };
+  }
+
+  sunSettings() {
+    const q = (selector) => this.root.querySelector(selector);
+    return {
+      color: q('#editor-sun-color').value,
+      intensity: Number(q('#editor-sun-intensity').value || 1.2),
+      ambientBoost: Number(q('#editor-sun-ambient').value || 0.25)
+    };
+  }
+
+  mapSettings() {
+    const q = (selector) => this.root.querySelector(selector);
+    return {
+      gravityMultiplier: Number(q('#editor-map-gravity').value || 1),
+      airControl: Number(q('#editor-map-air-control').value || 1),
+      drag: Number(q('#editor-map-drag').value || 1)
+    };
   }
 
   setUnlocked(unlocked) {
@@ -507,12 +682,19 @@ export class EditorUI {
 
   setSelectedInfo(meta, details = {}) {
     const info = this.root.querySelector('#editor-selected-info');
-    if (!meta) info.textContent = 'Selected: none';
-    else if (meta.supportsTransform) {
+    const status = this.root.querySelector('#editor-editing-status');
+    if (!meta) {
+      info.textContent = 'Selected: none';
+      if (status) status.textContent = 'Editing: Visual Object / Collision: OFF';
+    } else if (meta.supportsTransform) {
       const collision = details.collision ? ` / collision: ${details.collision.enabled ? 'ON' : 'OFF'}` : '';
       const animation = details.animation?.hasAnimations ? ` / animation: ${details.animation.selectedName || 'autoplay'}` : '';
       info.textContent = `Selected object: ${details.modelName || meta.id} / ${details.objectType || meta.type} / ${meta.id}${collision}${animation}`;
-    } else info.textContent = `Selected surface: ${meta.id} / ${meta.type} / ${meta.mapId || 'map'} / ${meta.floor || 'floor'} / texture: ${details.textureName || 'none'}`;
+      if (status) status.textContent = `Editing: ${details.editingCollision ? 'Collision Box' : 'Visual Object'} / Collision: ${details.collision?.enabled ? 'ON' : 'OFF'}`;
+    } else {
+      info.textContent = `Selected surface: ${meta.id} / ${meta.type} / ${meta.mapId || 'map'} / ${meta.floor || 'floor'} / texture: ${details.textureName || 'none'}`;
+      if (status) status.textContent = 'Editing: Visual Object / Collision: OFF';
+    }
     this.root.querySelector('#editor-brightness').value = details.brightness ?? 1;
     this.root.querySelector('#editor-repeat-x').value = details.repeat?.x ?? 1;
     this.root.querySelector('#editor-repeat-y').value = details.repeat?.y ?? 1;
