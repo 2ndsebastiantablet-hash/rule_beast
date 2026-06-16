@@ -40,3 +40,10 @@ rule_beast_roesbud_build2_files/
 rule_beast_rosebud_buid2_files/
 rule-beast-vr_Windows_Build_rosebud build2/
 rule-beast-v_windows_build_roesbud build2/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
