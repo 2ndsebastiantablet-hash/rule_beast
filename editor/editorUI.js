@@ -250,48 +250,6 @@ export class EditorUI {
         </section>
 
         <section class="editor-section">
-          <h3>Liquids</h3>
-          <div class="editor-input-grid">
-            <label>Liquid Type <select id="editor-liquid-type"></select></label>
-            <label>Color <input id="editor-liquid-color" type="color" value="#2f9bff"></label>
-            <label>Opacity <input id="editor-liquid-opacity" type="number" min="0.05" max="1" step="0.05" value="0.5"></label>
-            <label>Damage / sec <input id="editor-liquid-damage" type="number" min="0" step="1" value="0"></label>
-            <label>Movement Multiplier <input id="editor-liquid-movement" type="number" min="0.05" max="1" step="0.05" value="0.8"></label>
-            <label>Sink Speed <input id="editor-liquid-sink-speed" type="number" min="0" step="0.05" value="0"></label>
-          </div>
-          <div class="editor-actions">
-            <button id="editor-place-liquid">Place Liquid</button>
-            <button id="editor-liquid-hurts" class="secondary">Hurts OFF</button>
-            <button id="editor-liquid-instant" class="secondary">Instant Kill OFF</button>
-            <button id="editor-liquid-sink" class="secondary">Sink OFF</button>
-            <button id="editor-liquid-slime" class="secondary">Slime OFF</button>
-          </div>
-          <div class="editor-note">Liquid Settings: volumes are enterable by default and use simple box checks.</div>
-        </section>
-
-        <section class="editor-section">
-          <h3>Gas/Fog Settings</h3>
-          <div class="editor-input-grid">
-            <label>Gas / Fog Type <select id="editor-gas-type"></select></label>
-            <label>Color <input id="editor-gas-color" type="color" value="#dfe8ef"></label>
-            <label>Opacity <input id="editor-gas-opacity" type="number" min="0.02" max="1" step="0.05" value="0.25"></label>
-            <label>Density <input id="editor-gas-density" type="number" min="0" max="2" step="0.05" value="0.5"></label>
-            <label>Damage / sec <input id="editor-gas-damage" type="number" min="0" step="1" value="0"></label>
-            <label>Movement Multiplier <input id="editor-gas-movement" type="number" min="0.05" max="1.5" step="0.05" value="1"></label>
-            <label>Gravity Multiplier <input id="editor-gas-gravity" type="number" min="0" max="4" step="0.05" value="1"></label>
-            <label>Upward Force <input id="editor-gas-upward" type="number" min="0" step="0.05" value="0"></label>
-            <label>Downward Force <input id="editor-gas-downward" type="number" min="0" step="0.05" value="0"></label>
-          </div>
-          <div class="editor-actions">
-            <button id="editor-place-gas">Place Gas / Fog</button>
-            <button id="editor-gas-hurts" class="secondary">Hurts OFF</button>
-            <button id="editor-gas-instant" class="secondary">Instant Kill OFF</button>
-            <button id="editor-gas-vision" class="secondary">Vision OFF</button>
-            <button id="editor-gas-affects-gravity" class="secondary">Gravity OFF</button>
-          </div>
-        </section>
-
-        <section class="editor-section">
           <h3>Map Settings</h3>
           <div class="editor-input-grid">
             <label>Gravity Preset <select id="editor-map-gravity-preset"><option value="1">Normal gravity</option><option value="0.45">Low gravity</option><option value="1.8">Heavy gravity</option><option value="0.05">Zero gravity-ish</option></select></label>
@@ -415,24 +373,8 @@ export class EditorUI {
     q('#editor-edit-collision-box').addEventListener('click', () => this.callbacks.editCollisionBox?.());
     q('#editor-return-object-editing').addEventListener('click', () => this.callbacks.returnObjectEditing?.());
     q('#editor-reset-collision-box').addEventListener('click', () => this.callbacks.resetCollisionBox?.());
-    q('#editor-place-liquid').addEventListener('click', () => this.callbacks.placeLiquid?.(q('#editor-liquid-type').value));
-    q('#editor-place-gas').addEventListener('click', () => this.callbacks.placeGas?.(q('#editor-gas-type').value));
     q('#editor-add-sun').addEventListener('click', () => this.callbacks.placeSun?.());
-    q('#editor-liquid-hurts').addEventListener('click', () => this.toggleButtonSetting('#editor-liquid-hurts', 'Hurts', (value) => this.callbacks.updateLiquidSettings?.({ gameplay: { hurtsPlayer: value } })));
-    q('#editor-liquid-instant').addEventListener('click', () => this.toggleButtonSetting('#editor-liquid-instant', 'Instant Kill', (value) => this.callbacks.updateLiquidSettings?.({ gameplay: { instantKill: value } })));
-    q('#editor-liquid-sink').addEventListener('click', () => this.toggleButtonSetting('#editor-liquid-sink', 'Sink', (value) => this.callbacks.updateLiquidSettings?.({ gameplay: { sinkEnabled: value } })));
-    q('#editor-liquid-slime').addEventListener('click', () => this.toggleButtonSetting('#editor-liquid-slime', 'Slime', (value) => this.callbacks.updateLiquidSettings?.({ gameplay: { isSlime: value } })));
-    q('#editor-gas-hurts').addEventListener('click', () => this.toggleButtonSetting('#editor-gas-hurts', 'Hurts', (value) => this.callbacks.updateGasSettings?.({ gameplay: { hurtsPlayer: value } })));
-    q('#editor-gas-instant').addEventListener('click', () => this.toggleButtonSetting('#editor-gas-instant', 'Instant Kill', (value) => this.callbacks.updateGasSettings?.({ gameplay: { instantKill: value } })));
-    q('#editor-gas-vision').addEventListener('click', () => this.toggleButtonSetting('#editor-gas-vision', 'Vision', (value) => this.callbacks.updateGasSettings?.({ gameplay: { affectsVision: value } })));
-    q('#editor-gas-affects-gravity').addEventListener('click', () => this.toggleButtonSetting('#editor-gas-affects-gravity', 'Gravity', (value) => this.callbacks.updateGasSettings?.({ gameplay: { affectsGravity: value } })));
     q('#editor-sun-shadows').addEventListener('click', () => this.toggleButtonSetting('#editor-sun-shadows', 'Shadows', (value) => this.callbacks.updateSunSettings?.({ shadows: value })));
-    ['#editor-liquid-color', '#editor-liquid-opacity', '#editor-liquid-damage', '#editor-liquid-movement', '#editor-liquid-sink-speed'].forEach((selector) => {
-      q(selector).addEventListener('input', () => this.callbacks.updateLiquidSettings?.(this.liquidSettings()));
-    });
-    ['#editor-gas-color', '#editor-gas-opacity', '#editor-gas-density', '#editor-gas-damage', '#editor-gas-movement', '#editor-gas-gravity', '#editor-gas-upward', '#editor-gas-downward'].forEach((selector) => {
-      q(selector).addEventListener('input', () => this.callbacks.updateGasSettings?.(this.gasSettings()));
-    });
     ['#editor-sun-color', '#editor-sun-intensity', '#editor-sun-ambient'].forEach((selector) => {
       q(selector).addEventListener('input', () => this.callbacks.updateSunSettings?.(this.sunSettings()));
     });
@@ -511,46 +453,6 @@ export class EditorUI {
     button.dataset.enabled = String(next);
     button.textContent = `${label} ${next ? 'ON' : 'OFF'}`;
     callback?.(next);
-  }
-
-  setVolumeOptions(liquidTypes = [], gasTypes = []) {
-    const liquidSelect = this.root.querySelector('#editor-liquid-type');
-    const gasSelect = this.root.querySelector('#editor-gas-type');
-    if (liquidSelect && !liquidSelect.options.length) liquidSelect.innerHTML = liquidTypes.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
-    if (gasSelect && !gasSelect.options.length) gasSelect.innerHTML = gasTypes.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
-  }
-
-  liquidSettings() {
-    const q = (selector) => this.root.querySelector(selector);
-    return {
-      visual: {
-        color: q('#editor-liquid-color').value,
-        opacity: Number(q('#editor-liquid-opacity').value || 0.5)
-      },
-      gameplay: {
-        damagePerSecond: Number(q('#editor-liquid-damage').value || 0),
-        movementMultiplier: Number(q('#editor-liquid-movement').value || 0.8),
-        sinkSpeed: Number(q('#editor-liquid-sink-speed').value || 0)
-      }
-    };
-  }
-
-  gasSettings() {
-    const q = (selector) => this.root.querySelector(selector);
-    return {
-      visual: {
-        color: q('#editor-gas-color').value,
-        opacity: Number(q('#editor-gas-opacity').value || 0.25),
-        density: Number(q('#editor-gas-density').value || 0.5)
-      },
-      gameplay: {
-        damagePerSecond: Number(q('#editor-gas-damage').value || 0),
-        movementMultiplier: Number(q('#editor-gas-movement').value || 1),
-        gravityMultiplier: Number(q('#editor-gas-gravity').value || 1),
-        upwardForce: Number(q('#editor-gas-upward').value || 0),
-        downwardForce: Number(q('#editor-gas-downward').value || 0)
-      }
-    };
   }
 
   sunSettings() {

@@ -1,4 +1,4 @@
-import { DEFAULT_MAP_SETTINGS } from './volumeObjects.js';
+import { DEFAULT_MAP_SETTINGS } from './editorLighting.js';
 
 export const EDITOR_DRAFT_STORAGE_KEY = 'ruleBeastEditorDraftV1';
 export const EDITOR_VERSION = 1;

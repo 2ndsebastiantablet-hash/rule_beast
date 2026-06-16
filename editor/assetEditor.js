@@ -5,16 +5,7 @@ import { EditorState } from './editorState.js';
 import { buildEditorExport, downloadEditorJson, stringifyEditorExport } from './editorExport.js';
 import { buildCodexPackage, downloadCodexPackage } from './editorPackage.js';
 import { SHAPE_CATEGORIES, SHAPE_LIBRARY, createShapeObject, getShapeDefinition } from './shapeLibrary.js';
-import {
-  GAS_TYPES,
-  LIQUID_TYPES,
-  createGasVolumeObject,
-  createLiquidVolumeObject,
-  createSunLightObject,
-  gasDefaults,
-  liquidDefaults,
-  updateVolumeVisual
-} from './volumeObjects.js';
+import { createSunLightObject } from './editorLighting.js';
 import {
   getEditableObject,
   getEditableObjects,
@@ -49,12 +40,6 @@ const repoPath = (folder, name) => `assets/${folder}/${name.replace(/[^a-z0-9._-
 const clampBrightness = (brightness = 1) => THREE.MathUtils.clamp(Number(brightness) || 1, 0.25, 2.5);
 const toPlainVector = (v) => ({ x: Number(v.x.toFixed(3)), y: Number(v.y.toFixed(3)), z: Number(v.z.toFixed(3)) });
 const isSupportedMime = (file, allowed) => !file?.type || allowed.includes(file.type);
-const mergeSettings = (base = {}, patch = {}) => ({
-  ...base,
-  ...patch,
-  visual: { ...(base.visual || {}), ...(patch.visual || {}) },
-  gameplay: { ...(base.gameplay || {}), ...(patch.gameplay || {}) }
-});
 
 export function initAssetEditor(options) {
   return new AssetEditor(options);
@@ -163,11 +148,7 @@ class AssetEditor {
       selectModel: (id) => this.selectModel(id),
       removeModel: (id) => this.removeModel(id),
       selectShape: (id) => this.selectShape(id),
-      placeLiquid: (type) => this.placeLiquidVolume(type),
-      placeGas: (type) => this.placeGasVolume(type),
       placeSun: () => this.placeSunLight(),
-      updateLiquidSettings: (settings) => this.updateSelectedLiquidSettings(settings),
-      updateGasSettings: (settings) => this.updateSelectedGasSettings(settings),
       updateSunSettings: (settings) => this.updateSelectedSunSettings(settings),
       updateMapSettings: (settings) => this.updateMapSettings(settings),
       placeMarker: (kind) => this.placeMapMarker(kind),
@@ -193,7 +174,6 @@ class AssetEditor {
       returnObjectEditing: () => this.returnToObjectEditing(),
       resetCollisionBox: () => this.resetSelectedCollisionBoxToObjectBounds()
     });
-    this.ui.setVolumeOptions?.(LIQUID_TYPES, GAS_TYPES);
     options.renderer.domElement.addEventListener('pointerdown', (event) => this.handleCanvasPointerDown(event), true);
     options.renderer.domElement.addEventListener('dragover', (event) => this.handleCanvasDragOver(event), true);
     options.renderer.domElement.addEventListener('drop', (event) => this.handleCanvasDrop(event), true);
@@ -1147,62 +1127,6 @@ class AssetEditor {
     return placement;
   }
 
-  placeLiquidVolume(liquidType = 'water') {
-    const defaults = liquidDefaults(liquidType);
-    const position = this.placementPosition(null);
-    const placement = this.state.addPlacedModel({
-      id: nextId('placedLiquid', this.state.placedModels),
-      objectType: 'liquid',
-      type: 'liquid',
-      liquidType,
-      mapId: this.currentMapId(),
-      floor: this.floorFromY(position.y),
-      zone: 'editor_liquid_volume',
-      position: { x: position.x, y: Number((position.y + 0.15).toFixed(3)), z: position.z },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 5, y: 0.3, z: 4, uniform: 1 },
-      visual: defaults.visual,
-      gameplay: defaults.gameplay,
-      brightness: defaults.visual.brightness,
-      modelBrightness: defaults.visual.brightness,
-      supportsTexture: true,
-      collision: { enabled: false, volumeOnly: true, type: 'box', size: { x: 5, y: 0.3, z: 4 }, offset: { x: 0, y: 0, z: 0 } }
-    });
-    const object = createLiquidVolumeObject(placement);
-    this.options.scene.add(object);
-    this.registerPlacement(placement, object, { type: 'liquid', category: 'placed-liquid' });
-    this.log(`Placed liquid volume: ${liquidType}`);
-    return placement;
-  }
-
-  placeGasVolume(gasType = 'fog_cloud') {
-    const defaults = gasDefaults(gasType);
-    const position = this.placementPosition(null);
-    const placement = this.state.addPlacedModel({
-      id: nextId('placedGas', this.state.placedModels),
-      objectType: 'gas',
-      type: 'gas',
-      gasType,
-      mapId: this.currentMapId(),
-      floor: this.floorFromY(position.y),
-      zone: 'editor_gas_volume',
-      position: { x: position.x, y: Number((position.y + 1.5).toFixed(3)), z: position.z },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 5, y: 3, z: 5, uniform: 1 },
-      visual: defaults.visual,
-      gameplay: defaults.gameplay,
-      brightness: defaults.visual.brightness,
-      modelBrightness: defaults.visual.brightness,
-      supportsTexture: false,
-      collision: { enabled: false, volumeOnly: true, type: 'box', size: { x: 5, y: 3, z: 5 }, offset: { x: 0, y: 0, z: 0 } }
-    });
-    const object = createGasVolumeObject(placement);
-    this.options.scene.add(object);
-    this.registerPlacement(placement, object, { type: 'gas', category: 'placed-gas' });
-    this.log(`Placed gas/fog volume: ${gasType}`);
-    return placement;
-  }
-
   placeSunLight() {
     const existing = this.state.placedModels.find((placement) => placement.objectType === 'sunLight');
     if (existing) {
@@ -1233,28 +1157,6 @@ class AssetEditor {
     this.updateSelectedSunSettings(SUN_DEFAULT);
     this.log('Placed Sun / Main Light.');
     return placement;
-  }
-
-  updateSelectedLiquidSettings(settings = {}) {
-    const placement = this.selectedPlacement();
-    if (placement?.objectType !== 'liquid') return;
-    const merged = mergeSettings(placement, settings);
-    this.state.updatePlacedModel(placement.id, { visual: merged.visual, gameplay: merged.gameplay });
-    placement.visual = merged.visual;
-    placement.gameplay = merged.gameplay;
-    updateVolumeVisual(placement.object3D, placement);
-    this.refreshObjects();
-  }
-
-  updateSelectedGasSettings(settings = {}) {
-    const placement = this.selectedPlacement();
-    if (placement?.objectType !== 'gas') return;
-    const merged = mergeSettings(placement, settings);
-    this.state.updatePlacedModel(placement.id, { visual: merged.visual, gameplay: merged.gameplay });
-    placement.visual = merged.visual;
-    placement.gameplay = merged.gameplay;
-    updateVolumeVisual(placement.object3D, placement);
-    this.refreshObjects();
   }
 
   updateSelectedSunSettings(settings = {}) {
@@ -1388,10 +1290,6 @@ class AssetEditor {
       const texture = asset.textureObject.clone();
       const aspect = asset.width && asset.height ? asset.width / asset.height : 1.4;
       object = new THREE.Mesh(new THREE.PlaneGeometry(Math.max(0.6, aspect), 1), new THREE.MeshStandardMaterial({ map: texture, color: 0xffffff, transparent: true, side: THREE.DoubleSide }));
-    } else if (placement.objectType === 'liquid') {
-      object = createLiquidVolumeObject(placement);
-    } else if (placement.objectType === 'gas') {
-      object = createGasVolumeObject(placement);
     } else if (placement.objectType === 'sunLight') {
       object = createSunLightObject(placement);
     } else {

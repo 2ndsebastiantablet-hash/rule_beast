@@ -14,6 +14,7 @@ const editorUI = readFileSync(new URL('../editor/editorUI.js', import.meta.url),
 const importerScript = readFileSync(new URL('../tools/import-editor-package.mjs', import.meta.url), 'utf8');
 const ui = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
 const gitignore = readFileSync(new URL('../.gitignore', import.meta.url), 'utf8');
+const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const { SHAPE_LIBRARY, SHAPE_CATEGORIES } = await import('../editor/shapeLibrary.js');
 const {
   DEFAULT_MAP_ID,
@@ -141,8 +142,27 @@ assert.ok(assetEditor.includes('importImage') && assetEditor.includes('placeImag
 assert.ok(assetEditor.includes('isSupportedMime') && assetEditor.includes('loadImageElement') && assetEditor.includes('GIF loaded as static image in this version.'), 'asset upload validation should tolerate browser MIME quirks and use a clear GIF static fallback warning');
 assert.ok(editorUI.includes('editor-texture-file') && editorUI.includes('editor-image-file') && editorUI.includes('editor-model-file') && editorUI.includes('resetFileInput') && editorUI.includes('My Textures') && editorUI.includes('My Images/GIFs') && editorUI.includes('My Models'), 'editor upload inputs should be wired to visible upload lists and reset after each import');
 assert.ok(assetEditor.includes('selectShape') && assetEditor.includes('placeShapeAtPoint') && assetEditor.includes('SHAPE_LIBRARY') && assetEditor.includes('createShapeObject'), 'asset editor should expose a built-in shape placement workflow');
-assert.ok(assetEditor.includes('LIQUID_TYPES') && assetEditor.includes('placeLiquidVolume') && assetEditor.includes('updateSelectedLiquidSettings') && editorUI.includes('Liquid Settings'), 'asset editor should expose placeable liquid volumes and liquid settings');
-assert.ok(assetEditor.includes('GAS_TYPES') && assetEditor.includes('placeGasVolume') && assetEditor.includes('updateSelectedGasSettings') && editorUI.includes('Gas/Fog Settings'), 'asset editor should expose placeable gas/fog volumes and gas settings');
+const removedEditableVolumePatterns = [
+  'LIQUID_TYPES',
+  'GAS_TYPES',
+  'placeLiquidVolume',
+  'placeGasVolume',
+  'updateSelectedLiquidSettings',
+  'updateSelectedGasSettings',
+  'Liquid Settings',
+  'Gas/Fog Settings',
+  'placedLiquidVolumes',
+  'placedGasVolumes',
+  'createLiquidVolumeObject',
+  'createGasVolumeObject',
+  'getPermanentEditorVolumeEffects',
+  'setPermanentEditorVolumeEffects',
+  'updateVolumeEffects',
+  'pointInsideVolume'
+];
+[assetEditor, editorUI, editorExport, editorPackage, editorOverrides, importerScript, main, readme].forEach((source) => {
+  removedEditableVolumePatterns.forEach((pattern) => assert.ok(!source.includes(pattern), `editable liquid/gas volume feature should be removed: ${pattern}`));
+});
 assert.ok(assetEditor.includes('placeSunLight') && assetEditor.includes('updateSelectedSunSettings') && editorUI.includes('Sun / Main Light') && editorUI.includes('The Sun/Main Light is the main map light source'), 'asset editor should expose a movable/editable Sun/Main Light object');
 assert.ok(editorState.includes('mapSettings') && editorUI.includes('Map Settings') && editorUI.includes('gravityMultiplier'), 'editor state and UI should include map-level gravity settings');
 assert.ok(assetEditor.includes('AnimationMixer') && assetEditor.includes('animationMixers') && assetEditor.includes('autoplay'), 'asset editor should detect and autoplay animated GLBs where possible');
@@ -151,11 +171,11 @@ assert.ok(assetEditor.includes('copySelectedObject') && assetEditor.includes('ev
 assert.ok(assetEditor.includes("if (code === 'KeyS') return this.modelAction('move-forward'") && assetEditor.includes("if (code === 'KeyW') return this.modelAction('move-back'") && assetEditor.includes("if (code === 'KeyR') return this.modelAction('taller'") && assetEditor.includes("if (code === 'KeyG') return this.modelAction('thinner'"), 'selected object keyboard controls should match the requested PowerPoint-style mapping');
 assert.ok(!editorUI.includes('<h3>Current Tool Mode</h3>') && !editorUI.includes('<h3>Placed Objects</h3>') && !editorUI.includes('<h3>Model Edit Controls</h3>'), 'editor UI should remove old bulky tool mode, placed objects, and model edit sections');
 assert.ok(editorUI.includes('Shape Library') && editorUI.includes('Images / GIFs') && editorUI.includes('Map Package Type') && editorUI.includes('Selected Object') && editorUI.includes('Collision') && editorUI.includes('Editing: Collision Box'), 'editor UI should use simplified Map Maker sections and show object/collision editing status');
-assert.ok(editorExport.includes('packageType') && editorExport.includes('displayName') && editorExport.includes('placedShapes') && editorExport.includes('placedImagePlanes') && editorExport.includes('placedLiquidVolumes') && editorExport.includes('placedGasVolumes') && editorExport.includes('sunLights') && editorExport.includes('mapSettings') && editorExport.includes('collisionBoxTransforms') && editorExport.includes('animation'), 'editor export should include map/update metadata and all new placed object types/settings');
-assert.ok(editorPackage.includes('images/') && editorPackage.includes('gifs/') && editorPackage.includes('packageType is newMap') && editorPackage.includes('placedLiquidVolumes') && editorPackage.includes('placedGasVolumes') && editorPackage.includes('map gravity settings') && editorPackage.includes('Sun/Main Light'), 'Codex package should include new systems and mention new-map/update behavior');
-assert.ok(importerScript.includes('packageType') && importerScript.includes('newMap') && importerScript.includes('updateExistingMap') && importerScript.includes('images') && importerScript.includes('gifs') && importerScript.includes('placedLiquidVolumes') && importerScript.includes('placedGasVolumes') && importerScript.includes('mapSettings') && importerScript.includes('sunLights'), 'importer should preserve new-map/update packages and new volume/light arrays');
-assert.ok(editorOverrides.includes('placedLiquidVolumes') && editorOverrides.includes('placedGasVolumes') && editorOverrides.includes('createLiquidVolumeObject') && editorOverrides.includes('createGasVolumeObject') && editorOverrides.includes('setPermanentEditorVolumeEffects') && editorOverrides.includes('getPermanentEditorVolumeEffects') && editorOverrides.includes('applySunLightSettings') && editorOverrides.includes('mapSettings'), 'permanent override loader should load liquids, gas/fog, sun lights, and map settings');
-assert.ok(main.includes('updateVolumeEffects') && main.includes('getPermanentEditorVolumeEffects') && main.includes('mapGravityMultiplier') && main.includes('movementMultiplier') && main.includes('instantKill') && main.includes('damagePerSecond'), 'main gameplay loop should apply volume effects and map gravity safely');
+assert.ok(editorExport.includes('packageType') && editorExport.includes('displayName') && editorExport.includes('placedShapes') && editorExport.includes('placedImagePlanes') && editorExport.includes('sunLights') && editorExport.includes('mapSettings') && editorExport.includes('collisionBoxTransforms') && editorExport.includes('animation'), 'editor export should include map/update metadata and remaining placed object types/settings');
+assert.ok(editorPackage.includes('images/') && editorPackage.includes('gifs/') && editorPackage.includes('packageType is newMap') && editorPackage.includes('map gravity settings') && editorPackage.includes('Sun/Main Light'), 'Codex package should include remaining systems and mention new-map/update behavior');
+assert.ok(importerScript.includes('packageType') && importerScript.includes('newMap') && importerScript.includes('updateExistingMap') && importerScript.includes('images') && importerScript.includes('gifs') && importerScript.includes('mapSettings') && importerScript.includes('sunLights'), 'importer should preserve new-map/update packages and remaining light/map arrays');
+assert.ok(editorOverrides.includes('applySunLightSettings') && editorOverrides.includes('mapSettings'), 'permanent override loader should keep sun lights and map settings');
+assert.ok(main.includes('mapGravityMultiplier') && main.includes('mapGravityMoveMultiplier'), 'main should keep map gravity support without editable liquid/gas volume effects');
 ['Rule Beast Asset Editor', 'EDITOR MODE - LOCAL TESTING ONLY', 'Editor Mode: ON', 'Fly Mode: ON', 'Collision', 'Editor Fly Controls', 'Selected Model Controls', 'Export Editor JSON', 'Export Codex Package'].forEach((text) => {
   assert.ok(editorUI.includes(text), `editor UI should include ${text}`);
 });

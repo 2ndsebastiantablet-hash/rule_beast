@@ -27,11 +27,11 @@ Tasks:
 5. Replace temporary blob URLs with repo-relative asset paths.
 6. Apply surface texture edits permanently.
 7. Apply surface brightness edits permanently.
-8. Add placedShapes, placedImagePlanes, placed GLB models, placedLiquidVolumes, placedGasVolumes, collision boxes, spawn markers, puzzle station markers, lights, and Sun/Main Light permanently.
-9. Preserve position, rotation, scale, brightness/color, collision, collision box transforms, animation settings, liquid settings, gas/fog settings, and map gravity settings.
+8. Add placedShapes, placedImagePlanes, placed GLB models, collision boxes, spawn markers, puzzle station markers, lights, and Sun/Main Light permanently.
+9. Preserve position, rotation, scale, brightness/color, collision, collision box transforms, animation settings, and map gravity settings.
 10. If packageType is newMap, create a new official map option using the manifest spawns and puzzle stations.
 11. If packageType is updateExistingMap, update the existing permanent editor map override for ${mapId}.
-12. Make map gravity settings and volume effects permanent without adding cloud publishing.
+12. Make map gravity settings permanent without adding cloud publishing.
 13. Test locally.
 14. Commit and push to main.
 15. Give the exact commit hash.`;

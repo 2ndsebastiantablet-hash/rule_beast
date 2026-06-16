@@ -5,8 +5,6 @@ export function buildEditorExport({ mapId, mapDisplayName, state }) {
   const placedModels = placements.filter((placement) => placement.objectType === 'model' || !placement.objectType);
   const placedShapes = placements.filter((placement) => placement.objectType === 'shape');
   const placedImagePlanes = placements.filter((placement) => placement.objectType === 'image' || placement.objectType === 'gif');
-  const placedLiquidVolumes = placements.filter((placement) => placement.objectType === 'liquid');
-  const placedGasVolumes = placements.filter((placement) => placement.objectType === 'gas');
   const placedWalls = placedShapes.filter((placement) => placement.semanticRole === 'wall');
   const placedFloors = placedShapes.filter((placement) => placement.semanticRole === 'floor' || placement.semanticRole === 'platform');
   const spawnMarkers = placements.filter((placement) => placement.objectType === 'spawnMarker');
@@ -36,8 +34,6 @@ export function buildEditorExport({ mapId, mapDisplayName, state }) {
     placedFloors,
     placedImagePlanes,
     placedGifPlanes: placedImagePlanes.filter((placement) => placement.objectType === 'gif' || placement.isGif),
-    placedLiquidVolumes,
-    placedGasVolumes,
     collisionBoxes: placements.filter((placement) => placement.collision),
     collisionBoxTransforms: placements.filter((placement) => placement.collision).map((placement) => ({ objectId: placement.id, collision: placement.collision })),
     spawnMarkers,

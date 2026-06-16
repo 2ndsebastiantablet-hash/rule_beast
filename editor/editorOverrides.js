@@ -7,19 +7,13 @@ import {
 } from './editorRegistry.js';
 import { applyBrightnessToMaterial } from './assetEditor.js';
 import { createShapeObject } from './shapeLibrary.js';
-import {
-  createGasVolumeObject,
-  createLiquidVolumeObject,
-  createSunLightObject,
-  updateVolumeVisual
-} from './volumeObjects.js';
+import { createSunLightObject } from './editorLighting.js';
 
 const textureLoader = new THREE.TextureLoader();
 const gltfLoader = new GLTFLoader();
 let permanentOverrideObjects = [];
 let permanentMixers = [];
 let permanentCollisionColliders = [];
-let permanentVolumeEffects = [];
 let permanentMapSettings = null;
 let permanentSunLights = [];
 
@@ -141,7 +135,6 @@ export function clearPermanentEditorOverrides(scene) {
   permanentOverrideObjects = [];
   permanentMixers = [];
   permanentCollisionColliders = [];
-  permanentVolumeEffects = [];
   permanentMapSettings = null;
   permanentSunLights = [];
   unregisterEditableObjectsBySource('permanent-editor');
@@ -155,16 +148,8 @@ export function getPermanentEditorCollisionColliders() {
   return permanentCollisionColliders;
 }
 
-export function getPermanentEditorVolumeEffects() {
-  return permanentVolumeEffects;
-}
-
 export function getPermanentEditorMapSettings() {
   return permanentMapSettings;
-}
-
-export function setPermanentEditorVolumeEffects(effects = []) {
-  permanentVolumeEffects = effects;
 }
 
 function applySunLightSettings(scene, mapId, placement) {
@@ -287,30 +272,6 @@ export async function loadPermanentEditorOverrides({ scene, mapId }) {
       registerPermanentObject({ scene, mapId, placement, object, type: placement.isGif ? 'gif' : 'image', supportsTexture: true });
     } catch (error) {
       console.warn(`[Rule Beast] editor image plane failed: ${placement.id}`, error.message);
-    }
-  }
-
-  const liquidVolumes = data.placedLiquidVolumes || (data.placedObjects || []).filter((placement) => placement.objectType === 'liquid');
-  for (const placement of liquidVolumes) {
-    try {
-      const object = createLiquidVolumeObject(placement);
-      updateVolumeVisual(object, placement);
-      registerPermanentObject({ scene, mapId, placement, object, type: 'liquid', supportsTexture: true });
-      permanentVolumeEffects.push({ ...placement, type: 'liquid', objectType: 'liquid' });
-    } catch (error) {
-      console.warn(`[Rule Beast] editor liquid failed: ${placement.id}`, error.message);
-    }
-  }
-
-  const gasVolumes = data.placedGasVolumes || (data.placedObjects || []).filter((placement) => placement.objectType === 'gas');
-  for (const placement of gasVolumes) {
-    try {
-      const object = createGasVolumeObject(placement);
-      updateVolumeVisual(object, placement);
-      registerPermanentObject({ scene, mapId, placement, object, type: 'gas', supportsTexture: false });
-      permanentVolumeEffects.push({ ...placement, type: 'gas', objectType: 'gas' });
-    } catch (error) {
-      console.warn(`[Rule Beast] editor gas/fog failed: ${placement.id}`, error.message);
     }
   }
 
